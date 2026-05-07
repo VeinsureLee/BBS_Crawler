@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "migrate:up": "node-pg-migrate up -m migrations -j sql",
     "migrate:down": "node-pg-migrate down -m migrations -j sql",
-    "lint:tsc": "tsc -p tsconfig.json --noEmit"
+    "lint:tsc": "tsc -p tsconfig.json --noEmit",
+    "explore": "tsx scripts/explore.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

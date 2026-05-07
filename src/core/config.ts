@@ -18,6 +18,7 @@ const intFromEnv = z.preprocess((v) => {
 const ConfigSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   BROWSER_HEADLESS: boolFromEnv.default(true),
+  BROWSER_EXECUTABLE_PATH: z.string().optional(),
   BROWSER_USER_AGENT: z.string().optional(),
   STORAGE_STATE_DIR: z.string().default('./.state'),
   IDLE_TIMEOUT_MS: intFromEnv.default(300_000),
@@ -30,6 +31,7 @@ const ConfigSchema = z.object({
 export interface AppConfig {
   databaseUrl: string;
   browserHeadless: boolean;
+  browserExecutablePath: string | undefined;
   browserUserAgent: string | undefined;
   storageStateDir: string;
   idleTimeoutMs: number;
@@ -44,6 +46,7 @@ export function parseConfig(env: NodeJS.ProcessEnv | Record<string, string | und
   return {
     databaseUrl: raw.DATABASE_URL,
     browserHeadless: raw.BROWSER_HEADLESS,
+    browserExecutablePath: raw.BROWSER_EXECUTABLE_PATH,
     browserUserAgent: raw.BROWSER_USER_AGENT,
     storageStateDir: raw.STORAGE_STATE_DIR,
     idleTimeoutMs: raw.IDLE_TIMEOUT_MS,

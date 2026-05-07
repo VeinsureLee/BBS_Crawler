@@ -16,6 +16,7 @@ if (!siteKey) {
 const cfg = parseConfig(process.env);
 const pool = new BrowserPool({
   headless: false, // visible browser so the human can observe
+  executablePath: cfg.browserExecutablePath,
   userAgent: cfg.browserUserAgent,
   storageStateDir: cfg.storageStateDir,
   idleTimeoutMs: cfg.idleTimeoutMs,

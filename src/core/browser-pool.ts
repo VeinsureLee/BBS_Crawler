@@ -5,6 +5,7 @@ import { logger } from '../util/logger';
 
 export interface BrowserPoolOptions {
   headless: boolean;
+  executablePath?: string | undefined;
   userAgent?: string | undefined;
   storageStateDir: string;
   idleTimeoutMs: number;
@@ -30,8 +31,10 @@ export class BrowserPool {
   async acquire(siteKey: string): Promise<AcquiredContext> {
     if (!this.browser) {
       const launch = this.opts.launcher ?? ((o) => chromium.launch(o));
-      this.browser = await launch({ headless: this.opts.headless });
-      logger.info({ siteKey }, 'browser launched');
+      const launchOpts: LaunchOptions = { headless: this.opts.headless };
+      if (this.opts.executablePath) launchOpts.executablePath = this.opts.executablePath;
+      this.browser = await launch(launchOpts);
+      logger.info({ siteKey, executablePath: this.opts.executablePath }, 'browser launched');
     }
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     this.inFlight++;
