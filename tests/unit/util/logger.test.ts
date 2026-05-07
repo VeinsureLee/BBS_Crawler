@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactString, addRedactedSecret, _resetForTests } from '../../../../src/util/logger';
+import { redactString, addRedactedSecret, _resetForTests } from '../../../src/util/logger';
 
 describe('redactString', () => {
   it('replaces every registered secret with ***', () => {

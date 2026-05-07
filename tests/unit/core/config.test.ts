@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseConfig, credentialEnvKeys, getCredentials } from '../../../../src/core/config';
-import { MissingCredentialsError } from '../../../../src/core/errors';
+import { parseConfig, credentialEnvKeys, getCredentials } from '../../../src/core/config';
+import { MissingCredentialsError } from '../../../src/core/errors';
 
 const baseEnv = { DATABASE_URL: 'postgres://u:p@h/db' };
 

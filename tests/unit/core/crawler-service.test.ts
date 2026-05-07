@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { CrawlerService } from '../../../../src/core/crawler-service';
-import type { SiteAdapter, Thread } from '../../../../src/core/site-adapter';
+import { CrawlerService } from '../../../src/core/crawler-service';
+import type { SiteAdapter, Thread } from '../../../src/core/site-adapter';
 import {
   SessionExpiredError,
   NavigationTimeoutError,
   RateLimitedError,
-} from '../../../../src/core/errors';
+} from '../../../src/core/errors';
 
 function makeAdapter(thread: Thread): SiteAdapter {
   return {
@@ -21,7 +21,7 @@ function makeAdapter(thread: Thread): SiteAdapter {
   } as unknown as SiteAdapter;
 }
 
-const fakePage = {} as never;
+const fakePage = { close: async () => {} } as never;
 const fakeContext = { newPage: async () => fakePage } as never;
 
 function deps(adapter: SiteAdapter, opts: {

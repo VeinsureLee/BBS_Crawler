@@ -12,5 +12,11 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    mainFields: ['module', 'main'],
+  },
+  esbuild: {
+    loader: 'ts',
+    include: /\.ts$/,
+    exclude: [],
   },
 });

@@ -1,18 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { newDb } from 'pg-mem';
-import { _setPoolForTests } from '../../../src/repository/db';
-import { upsertSite } from '../../../src/repository/sites';
-import { register, getAdapter, _resetForTests as resetRegistry } from '../../../src/core/registry';
-import { createRateLimiter } from '../../../src/core/rate-limiter';
-import { AuthManager } from '../../../src/core/auth-manager';
-import { CrawlerService } from '../../../src/core/crawler-service';
-import { upsertThread } from '../../../src/repository/threads';
-import { upsertPosts } from '../../../src/repository/posts';
-import { appendFetchLog } from '../../../src/repository/fetch-log';
-import { createStubAdapter } from '../../fixtures/stub-adapter';
-import type { Thread } from '../../../src/core/site-adapter';
+import { _setPoolForTests } from '../../src/repository/db';
+import { upsertSite } from '../../src/repository/sites';
+import { register, getAdapter, _resetForTests as resetRegistry } from '../../src/core/registry';
+import { createRateLimiter } from '../../src/core/rate-limiter';
+import { AuthManager } from '../../src/core/auth-manager';
+import { CrawlerService } from '../../src/core/crawler-service';
+import { upsertThread } from '../../src/repository/threads';
+import { upsertPosts } from '../../src/repository/posts';
+import { appendFetchLog } from '../../src/repository/fetch-log';
+import { createStubAdapter } from '../fixtures/stub-adapter';
+import type { Thread } from '../../src/core/site-adapter';
 
-const fakePage = {} as never;
+const fakePage = { close: async () => {} } as never;
 const fakeContext = { newPage: async () => fakePage } as never;
 function fakeBrowserPool() {
   return {
@@ -24,7 +24,7 @@ function fakeBrowserPool() {
 const sampleThread: Thread = {
   url: 'https://stub.example.invalid/t/1',
   title: 'Hello',
-  posts: [{ floor: 1, author: 'a', content_html: '<p>hi</p>', content_text: 'hi' }],
+  posts: [{ floor: 1, author: 'a', contentHtml: '<p>hi</p>', contentText: 'hi' }],
   fetchedAt: '2026-05-07T00:00:00Z',
 };
 

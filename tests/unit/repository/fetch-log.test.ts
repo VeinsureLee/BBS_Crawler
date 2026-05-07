@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { newDb } from 'pg-mem';
-import { _setPoolForTests, getPool } from '../../../../src/repository/db';
-import { appendFetchLog } from '../../../../src/repository/fetch-log';
+import { _setPoolForTests, getPool } from '../../../src/repository/db';
+import { appendFetchLog } from '../../../src/repository/fetch-log';
 
 beforeEach(() => {
   const mem = newDb();

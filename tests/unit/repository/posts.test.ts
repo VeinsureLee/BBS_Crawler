@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { newDb } from 'pg-mem';
-import { _setPoolForTests, getPool } from '../../../../src/repository/db';
-import { upsertSite } from '../../../../src/repository/sites';
-import { upsertThread } from '../../../../src/repository/threads';
-import { upsertPosts } from '../../../../src/repository/posts';
+import { _setPoolForTests, getPool } from '../../../src/repository/db';
+import { upsertSite } from '../../../src/repository/sites';
+import { upsertThread } from '../../../src/repository/threads';
+import { upsertPosts } from '../../../src/repository/posts';
 
 beforeEach(async () => {
   const mem = newDb();

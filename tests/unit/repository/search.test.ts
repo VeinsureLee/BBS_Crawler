@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { _setPoolForTests } from '../../../../src/repository/db';
-import { searchCache } from '../../../../src/repository/search';
+import { _setPoolForTests } from '../../../src/repository/db';
+import { searchCache } from '../../../src/repository/search';
 
 function makeFakePool(captured: { sql?: string; params?: unknown[] }) {
   return {

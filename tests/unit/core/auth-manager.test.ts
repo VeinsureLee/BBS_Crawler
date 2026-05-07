@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AuthManager } from '../../../../src/core/auth-manager';
-import type { SiteAdapter } from '../../../../src/core/site-adapter';
-import { SessionExpiredError, MissingCredentialsError } from '../../../../src/core/errors';
+import { AuthManager } from '../../../src/core/auth-manager';
+import type { SiteAdapter } from '../../../src/core/site-adapter';
+import { SessionExpiredError, MissingCredentialsError } from '../../../src/core/errors';
 
 const fakePage = {} as never;
 
