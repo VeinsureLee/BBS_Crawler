@@ -3,31 +3,33 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "migrate:up": "node-pg-migrate up -m migrations -j sql",
-    "migrate:down": "node-pg-migrate down -m migrations -j sql",
+    "migrate:up": "tsx scripts/migrate.ts up",
+    "migrate:down": "tsx scripts/migrate.ts down",
+    "migrate:status": "tsx scripts/migrate.ts status",
     "lint:tsc": "tsc -p tsconfig.json --noEmit",
     "explore": "tsx scripts/explore.ts"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.4.5",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@types/js-yaml": "^4.0.9",
     "dotenv": "^16.4.5",
-    "node-pg-migrate": "^7.6.1",
-    "pg": "^8.12.0",
+    "js-yaml": "^4.1.1",
     "pino": "^9.4.0",
     "playwright": "^1.46.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
-    "@types/pg": "^8.11.6",
-    "pg-mem": "^3.0.3",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "vitest": "^2.0.5"

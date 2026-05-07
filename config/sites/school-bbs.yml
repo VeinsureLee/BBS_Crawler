@@ -1,0 +1,34 @@
+# Site config for the school-bbs adapter.
+#
+# This file is loaded at runtime by src/core/site-config.ts and validated with
+# a zod schema. Adapter logic and crawl scripts must read selectors / routes
+# from here, not hardcode them.
+#
+# Secrets (baseUrl, credentials) stay in .env -- this file is committed.
+
+siteKey: school-bbs
+displayName: School BBS
+
+# Hashbang SPA route templates.
+# {key} placeholders are URL-safe path segments.
+routes:
+  section: "/#!section/{key}"
+  board:   "/#!board/{key}"
+  thread:  "/#!article/{boardKey}/{threadId}"
+
+selectors:
+  login:
+    form: '#f_login'
+    usernameInput: 'input[name="id"]'
+    passwordInput: 'input[name="passwd"]'
+    submitButton: 'input[type="submit"]'
+    loggedInIndicator: '#u_login'
+  section:
+    boardRowReady: 'td.title_1'
+  board:
+    threadRowReady: 'a[href^="/article/"]'
+
+crawl:
+  # How many pages to crawl per board on each run. Plain page count, no
+  # incremental cursor logic at this stage.
+  boardPages: 3

@@ -1,15 +1,13 @@
-import { getPool } from './db';
+import { getDb } from './db';
 import { DatabaseError } from '../core/errors';
 import type { Post } from '../core/site-adapter';
 
 export async function upsertPosts(threadId: number, posts: Post[]): Promise<void> {
   if (posts.length === 0) return;
   try {
-    const client = await getPool().connect();
-    try {
-      await client.query('BEGIN');
+    await getDb().transaction(async (tx) => {
       for (const p of posts) {
-        await client.query(
+        await tx.query(
           `INSERT INTO posts
              (thread_id, floor, author, posted_at, content_html, content_text, attachments)
            VALUES ($1,$2,$3,$4,$5,$6,$7)
@@ -26,13 +24,7 @@ export async function upsertPosts(threadId: number, posts: Post[]): Promise<void
           ],
         );
       }
-      await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+    });
   } catch (e) {
     throw new DatabaseError(`upsertPosts failed for thread ${threadId}`, e);
   }

@@ -9,15 +9,16 @@ import type {
   Thread,
 } from '../../core/site-adapter';
 import { register } from '../../core/registry';
-import { selectors } from './selectors';
+import { loadSiteConfig } from '../../core/site-config';
+
+const ui = loadSiteConfig('school-bbs').selectors;
 
 const siteKey = 'school-bbs';
 const displayName = 'School BBS';
 
 async function isLoggedIn(page: Page): Promise<boolean> {
-  // TODO: implement after analyzing login state
   try {
-    await page.waitForSelector(selectors.userInfo, { timeout: 3000 });
+    await page.waitForSelector(ui.login.loggedInIndicator, { timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -25,18 +26,25 @@ async function isLoggedIn(page: Page): Promise<boolean> {
 }
 
 async function login(page: Page, credentials: LoginCredentials): Promise<void> {
-  // TODO: implement after analyzing login page
   const baseUrl = process.env.SCHOOL_BBS_BASE_URL;
   if (!baseUrl) throw new Error('SCHOOL_BBS_BASE_URL not set');
 
-  const loginUrl = process.env.SCHOOL_BBS_LOGIN_URL || `${baseUrl}/login`;
-  await page.goto(loginUrl, { waitUntil: 'networkidle' });
+  await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
-  // Placeholder - update selectors after analysis
-  await page.fill(selectors.usernameInput, credentials.username);
-  await page.fill(selectors.passwordInput, credentials.password);
-  await page.click(selectors.submitButton);
-  await page.waitForLoadState('networkidle');
+  // Check if already on login page with form
+  const hasLoginForm = await page.locator(ui.login.form).count() > 0;
+  if (hasLoginForm) {
+    await page.fill(ui.login.usernameInput, credentials.username);
+    await page.fill(ui.login.passwordInput, credentials.password);
+    await page.click(ui.login.submitButton);
+    await page.waitForLoadState('networkidle');
+  }
+
+  // Verify login success
+  const loggedIn = await isLoggedIn(page);
+  if (!loggedIn) {
+    throw new Error('Login failed - could not verify logged-in state');
+  }
 }
 
 async function listThreads(page: Page, params: ListParams): Promise<ThreadSummary[]> {

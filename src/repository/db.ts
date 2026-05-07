@@ -1,32 +1,102 @@
-import pg from 'pg';
+/**
+ * Database access layer.
+ *
+ * Backed by PGlite (https://pglite.dev) — a real PostgreSQL compiled to
+ * WASM/native that stores its data in a local directory. Zero external
+ * services, zero install for end users beyond `npm install`.
+ *
+ * Repository code talks to a small `Db` interface (query + transaction) so
+ * tests can inject a fake without touching the PGlite implementation.
+ */
+import { PGlite } from '@electric-sql/pglite';
 import { DatabaseError } from '../core/errors';
 
-let pool: pg.Pool | null = null;
-
-export function initDb(databaseUrl: string): pg.Pool {
-  if (pool) return pool;
-  pool = new pg.Pool({ connectionString: databaseUrl });
-  pool.on('error', (err) => {
-    // Swallow idle-client errors; the pool will recreate connections.
-    // eslint-disable-next-line no-console
-    console.error('[pg pool] idle client error:', err.message);
-  });
-  return pool;
+export interface QueryResult<T = Record<string, unknown>> {
+  rows: T[];
+  affectedRows?: number | undefined;
 }
 
-export function getPool(): pg.Pool {
-  if (!pool) throw new DatabaseError('initDb has not been called');
-  return pool;
+export interface TxClient {
+  query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>>;
 }
 
-export async function closeDb(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = null;
+export interface Db {
+  query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>>;
+  /** Run multi-statement DDL/DML. No params; for migrations and similar. */
+  exec(sql: string): Promise<void>;
+  transaction<R>(fn: (tx: TxClient) => Promise<R>): Promise<R>;
+  close(): Promise<void>;
+}
+
+class PGliteDb implements Db {
+  constructor(private pg: PGlite) {}
+
+  async query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>> {
+    const r = await this.pg.query<T>(sql, params as unknown[] | undefined);
+    return { rows: r.rows, affectedRows: r.affectedRows };
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.pg.exec(sql);
+  }
+
+  async transaction<R>(fn: (tx: TxClient) => Promise<R>): Promise<R> {
+    return this.pg.transaction(async (t) => {
+      const tx: TxClient = {
+        query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]) => {
+          const r = await t.query<T>(sql, params as unknown[] | undefined);
+          return { rows: r.rows, affectedRows: r.affectedRows };
+        },
+      };
+      return fn(tx);
+    }) as R;
+  }
+
+  async close(): Promise<void> {
+    await this.pg.close();
   }
 }
 
-/** Inject a pg.Pool directly. Used by tests with pg-mem. */
-export function _setPoolForTests(p: pg.Pool | null): void {
-  pool = p;
+let db: Db | null = null;
+
+export function initDb(dataDir: string): Db {
+  if (db) return db;
+  const pg = new PGlite(dataDir);
+  db = new PGliteDb(pg);
+  return db;
+}
+
+export function getDb(): Db {
+  if (!db) throw new DatabaseError('initDb has not been called');
+  return db;
+}
+
+export async function closeDb(): Promise<void> {
+  if (db) {
+    await db.close();
+    db = null;
+  }
+}
+
+/** Inject a Db implementation directly. Used by tests. */
+export function _setDbForTests(d: Db | null): void {
+  db = d;
+}
+
+/**
+ * Backwards-compat shim: some repository code still imports getPool().
+ * Deprecated — use getDb() instead.
+ * @deprecated
+ */
+export function getPool(): Db {
+  return getDb();
 }

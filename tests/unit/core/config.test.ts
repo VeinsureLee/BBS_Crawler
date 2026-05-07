@@ -2,12 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { parseConfig, credentialEnvKeys, getCredentials } from '../../../src/core/config';
 import { MissingCredentialsError } from '../../../src/core/errors';
 
-const baseEnv = { DATABASE_URL: 'postgres://u:p@h/db' };
-
 describe('parseConfig', () => {
   it('parses minimal env with defaults', () => {
-    const cfg = parseConfig({ ...baseEnv });
-    expect(cfg.databaseUrl).toBe('postgres://u:p@h/db');
+    const cfg = parseConfig({});
+    expect(cfg.pgDataDir).toBe('./.pgdata');
     expect(cfg.browserHeadless).toBe(true);
     expect(cfg.rateMinIntervalMs).toBe(1500);
     expect(cfg.rateJitterMs).toBe(1000);
@@ -19,22 +17,19 @@ describe('parseConfig', () => {
 
   it('overrides via env values', () => {
     const cfg = parseConfig({
-      ...baseEnv,
+      PGDATA_DIR: './data/pglite',
       BROWSER_HEADLESS: 'false',
       RATE_MIN_INTERVAL_MS: '2500',
       LOG_LEVEL: 'debug',
     });
+    expect(cfg.pgDataDir).toBe('./data/pglite');
     expect(cfg.browserHeadless).toBe(false);
     expect(cfg.rateMinIntervalMs).toBe(2500);
     expect(cfg.logLevel).toBe('debug');
   });
 
-  it('throws when DATABASE_URL is missing', () => {
-    expect(() => parseConfig({})).toThrow(/DATABASE_URL/);
-  });
-
   it('throws on non-numeric numeric envs', () => {
-    expect(() => parseConfig({ ...baseEnv, RATE_MIN_INTERVAL_MS: 'abc' })).toThrow();
+    expect(() => parseConfig({ RATE_MIN_INTERVAL_MS: 'abc' })).toThrow();
   });
 });
 

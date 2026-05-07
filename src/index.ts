@@ -18,7 +18,7 @@ import { addRedactedSecret, logger } from './util/logger';
 
 async function main(): Promise<void> {
   const cfg = parseConfig(process.env);
-  initDb(cfg.databaseUrl);
+  initDb(cfg.pgDataDir);
 
   const browserPool = new BrowserPool({
     headless: cfg.browserHeadless,

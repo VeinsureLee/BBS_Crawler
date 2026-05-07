@@ -3,17 +3,14 @@
  * Update these as we analyze the page structure.
  */
 export const selectors = {
-  // Login page
-  loginForm: 'form',
-  usernameInput: 'input[name="id"]',
-  passwordInput: 'input[name="passwd"]',
-  submitButton: 'input[type="submit"]',
+  // Login-related selectors have moved to ./ui-elements.ts (ui.login).
+  userName: '.u-login-id a',
 
-  // Logged-in indicator
-  userInfo: '.nav-item.user-info, .user-panel',
+  // Section/board navigation
+  sectionLinks: '#xlist a[href*="/section/"]',
+  boardLinks: '#xlist a[href*="/board/"]',
 
   // Board/section listing
-  boardLinks: 'a[href*="board"]',
   threadRows: 'tr[class*="thread"]',
 
   // Thread list (board page)
@@ -33,4 +30,7 @@ export const selectors = {
   // Pagination
   nextPageLink: 'a.next, a[rel="next"]',
   pageLinks: '.pagination a',
+
+  // Widgets on homepage
+  widgetList: '.w-list-line li a',
 };
