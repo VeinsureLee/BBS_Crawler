@@ -26,15 +26,86 @@ import type { Page } from 'playwright';
 import type { ListParams, ThreadSummary } from '../../core/site-adapter';
 import { buildRouteUrl } from '../../core/site-config';
 
-/** Date appearing on the board page is YYYY-MM-DD in CST. */
-function dateToIso(d: string | undefined): string | undefined {
+const CST_OFFSET_MS = 8 * 3600 * 1000;
+
+/** Today in Beijing (CST = UTC+8) as Y/M/D parts. */
+function cstToday(): { y: number; m: number; d: number } {
+  const now = new Date();
+  const cst = new Date(now.getTime() + CST_OFFSET_MS);
+  return { y: cst.getUTCFullYear(), m: cst.getUTCMonth() + 1, d: cst.getUTCDate() };
+}
+
+/** Build an ISO timestamp from Y/M/D at 00:00 CST. */
+function cstMidnightIso(y: number, m: number, d: number): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return new Date(`${y}-${pad(m)}-${pad(d)}T00:00:00+08:00`).toISOString();
+}
+
+/** Subtract N days from CST today, return Y/M/D. */
+function cstDaysAgo(n: number): { y: number; m: number; d: number } {
+  const now = new Date();
+  const cst = new Date(now.getTime() + CST_OFFSET_MS - n * 24 * 3600 * 1000);
+  return { y: cst.getUTCFullYear(), m: cst.getUTCMonth() + 1, d: cst.getUTCDate() };
+}
+
+/**
+ * Parse a date label as it appears on a school-bbs board page into ISO 8601.
+ * Returns undefined for unrecognized formats (caller treats as "no signal";
+ * incremental crawl won't stop on such rows).
+ *
+ * Supported:
+ *   YYYY-MM-DD      e.g. "2026-04-16"        → 00:00 CST that day
+ *   MM-DD           e.g. "04-16"             → 00:00 CST that day, current CST year
+ *   HH:MM           e.g. "14:30"             → 14:30 CST today
+ *   今天 / 昨天 / 前天                          → 00:00 CST relative day
+ *   N天前           e.g. "3天前"              → 00:00 CST that day
+ */
+export function dateToIso(d: string | undefined): string | undefined {
   if (!d) return undefined;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d.trim());
-  if (!m) return undefined;
-  // Treat as 00:00 China time → UTC. (Site is CST = UTC+8.)
-  const iso = `${m[1]}-${m[2]}-${m[3]}T00:00:00+08:00`;
-  const t = new Date(iso);
-  return Number.isNaN(t.getTime()) ? undefined : t.toISOString();
+  const s = d.trim();
+  if (!s) return undefined;
+
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return cstMidnightIso(Number(m[1]), Number(m[2]), Number(m[3]));
+
+  m = /^(\d{2})-(\d{2})$/.exec(s);
+  if (m) {
+    const today = cstToday();
+    return cstMidnightIso(today.y, Number(m[1]), Number(m[2]));
+  }
+
+  m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (m) {
+    const today = cstToday();
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    return new Date(
+      `${today.y}-${pad(today.m)}-${pad(today.d)}T${pad(Number(m[1]))}:${m[2]}:00+08:00`,
+    ).toISOString();
+  }
+
+  if (s === '今天') {
+    const t = cstToday();
+    return cstMidnightIso(t.y, t.m, t.d);
+  }
+  if (s === '昨天') {
+    const t = cstDaysAgo(1);
+    return cstMidnightIso(t.y, t.m, t.d);
+  }
+  if (s === '前天') {
+    const t = cstDaysAgo(2);
+    return cstMidnightIso(t.y, t.m, t.d);
+  }
+
+  m = /^(\d+)天前$/.exec(s);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n >= 0) {
+      const t = cstDaysAgo(n);
+      return cstMidnightIso(t.y, t.m, t.d);
+    }
+  }
+
+  return undefined;
 }
 
 export interface ParsedThreadRow {
@@ -99,7 +170,9 @@ export async function fetchBoardPage(
     for (let i = 0; i < trs.length; i++) {
       const tr = trs[i]!;
       const cls = tr.getAttribute('class') ?? '';
-      const isPinned = / (?:^|\s)top(?:\s|$)/.test(' ' + cls);
+      // Pinned rows are <tr class="top">. Match by token, not substring, so
+      // an unrelated class like "topic" wouldn't false-positive.
+      const isPinned = cls.split(/\s+/).indexOf('top') >= 0;
 
       const titleCell = tr.querySelector('td.title_9');
       if (!titleCell) continue;

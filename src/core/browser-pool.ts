@@ -66,7 +66,10 @@ export class BrowserPool {
   }
 
   storageStatePathFor(siteKey: string): string {
-    return path.join(this.opts.storageStateDir, `${siteKey}.storageState.json`);
+    // Must match what `scripts/auth/do-login.ts` and `scripts/init/init-*.ts`
+    // use, otherwise MCP server boots without login state and ensureLoggedIn
+    // re-logs on every browser launch.
+    return path.join(this.opts.storageStateDir, `${siteKey}.json`);
   }
 
   async wipeStorageState(siteKey: string): Promise<void> {
