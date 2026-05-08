@@ -2,14 +2,16 @@
 
 基于 Playwright 的 MCP 服务，爬取论坛帖子并落库到本地 PostgreSQL。作为 **BBS Agent of BYR** 项目的数据摄取层。
 
-> 状态：活跃开发中——框架完成，使用 PGlite 存储，`school-bbs` 适配器部分实现（分区/版面/置顶帖爬取可用，listThreads/search 待实现）。English version: [`README.md`](README.md)。
+> 状态：活跃开发中——框架完整，使用 PGlite 存储。`school-bbs` 适配器已实现完整生命周期：登录 + 分区/版面/置顶帖初始化、按需 `listThreads`（增量与翻页两模式）、`getThread`。English version: [`README.md`](README.md)。
 
 ## 它做什么
 
-- 暴露一组高层 MCP tool（`forum_search` / `forum_list_threads` / `forum_get_thread` 等），供自定义 agent 按需爬取论坛内容。
-- 通过 Playwright 驱动真实 Chromium 浏览器，能拿到登录后才可见的页面。
+- 暴露 4 个高层 MCP tool（`forum_list_sites` / `forum_list_threads` / `forum_get_thread` / `forum_session_status`），供自定义 agent 按需爬取论坛内容。
+- 通过 Playwright 驱动真实 Chromium 浏览器，拿到登录后才可见的页面。
 - 用 Playwright 的 `storageState` 持久化登录会话——agent 不需要每次都重新提交账密。
-- 可选地把抓取到的内容写入嵌入式 PGlite 数据库（`persist: true`），后续给 RAG / 批量处理使用。
+- 可选的本地加密凭据缓存（AES-256-GCM）：cookie 失效时不强迫用户手动重登（前提是登录时选择了"记住密码"）。
+- 爬到的内容**总是**写入嵌入式 PGlite。`threads` 单表通过 `is_pinned` 字段区分初始化时抓的置顶帖与按需爬的日常帖；`board_crawl_state` 记录每个版面的爬取进度，支持 agent 增量只拉新帖。
+- 下游查询 / RAG / embedding 由独立的 [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) 项目负责——本 MCP 只爬取与持久化。
 - 站点适配器可插拔：内置 `school-bbs` 适配器；新站点只需在 `src/adapters/<site>/` 下加一个文件。
 
 ## 在生态里的位置
@@ -40,12 +42,12 @@ npx playwright install chromium
 # 2. 配置环境
 cp .env.example .env
 # 填入 SCHOOL_BBS_USERNAME、SCHOOL_BBS_PASSWORD、SCHOOL_BBS_BASE_URL
-# (DATABASE_URL 可选，默认使用 ./.pglite 本地 PGlite)
+# （PGDATA_DIR 可选，默认 ./.pgdata）
 
-# 3. 首次登录（保存登录状态）
+# 3. 首次登录（保存 storageState；询问是否记住密码）
 npm run login school-bbs
 
-# 4. 初始化数据库结构（可选，用于全站爬取）
+# 4. 初始化论坛结构（一次性）
 npm run init:sections school-bbs
 npm run init:boards school-bbs
 npm run init:pinned school-bbs
@@ -53,6 +55,10 @@ npm run init:pinned school-bbs
 # 5. 启动 MCP 服务（stdio）
 npm run start
 ```
+
+登录脚本会问 `Remember password? (y/N)`：
+- 选 `y` → 凭据用 AES-256-GCM 加密写到 `./.state/<siteKey>.credentials.enc`（mode 0600）。之后 cookie 失效时，auth manager 会自动用缓存凭据重登，agent 完全感知不到 `SESSION_EXPIRED`。
+- 选 `N` → 仅 cookie 模式，会话失效时手动再跑一次 `npm run login`。
 
 接入 Claude Code / Claude Desktop / 自定义 agent 时，把它作为 stdio MCP 服务注册即可。`claude_desktop_config.json` 配置片段示例：
 
@@ -63,9 +69,9 @@ npm run start
       "command": "node",
       "args": ["d:/MyProject/Python_Project/BBS_Crawler/dist/index.js"],
       "env": {
-        "DATABASE_URL": "postgres://crawler:***@localhost:5432/bbs_crawler",
         "SCHOOL_BBS_USERNAME": "...",
-        "SCHOOL_BBS_PASSWORD": "..."
+        "SCHOOL_BBS_PASSWORD": "...",
+        "SCHOOL_BBS_BASE_URL": "..."
       }
     }
   }
@@ -77,14 +83,61 @@ npm run start
 | Tool | 用途 |
 |---|---|
 | `forum_list_sites` | 查询已注册的站点适配器 |
-| `forum_search` | 站点关键词搜索 |
-| `forum_list_threads` | 板块列表（分页） |
-| `forum_get_thread` | 取整个帖子（含回复） |
-| `forum_query_cache` | 在已落库内容上做关键词检索（不开浏览器） |
+| `forum_list_threads` | 按版面**精确名称**爬取帖子（增量或翻页两种模式） |
+| `forum_get_thread` | 取单帖完整内容（含全部楼层） |
 | `forum_session_status` | 查看某站点的登录状态 |
-| `forum_relogin` | 强制重跑登录流程 |
 
-站点相关 tool 第一参数为 `siteKey`（如 `"school-bbs"`）。所有 tool 返回的 JSON 都带 `siteKey` 和 `fetchedAt`，方便 agent 判断数据新鲜度。数据流分三条路径：实时抓取、抓取后落库（`persist: true`）、纯查缓存（`forum_query_cache`）。
+`forum_search` / `forum_query_cache` / `forum_relogin` 已被移除——搜索/缓存查询由 [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) 项目负责；重登在凭据缓存可用时自动发生。
+
+### 回包结构
+
+4 个工具统一返回如下 JSON envelope（包成 MCP 单 `text` content）：
+
+```jsonc
+// 成功
+{
+  "ok": true,
+  "data": <工具特定的数据>,
+  "nextCursor": { "startPage": 4 } | null,   // 仅 forum_list_threads
+  "state": {                                  // 仅 forum_list_threads
+    "deepestPageCrawled": 12,
+    "latestThreadPostedAt": "2026-05-08T03:14:00Z",
+    "lastCrawledAt": "2026-05-08T10:23:00Z"
+  }
+}
+
+// 失败
+{
+  "ok": false,
+  "error": { "code": "SESSION_EXPIRED" | "LOGIN_FAILED" | "BOARD_NOT_FOUND" | "FETCH_FAILED",
+             "message": "..." }
+}
+```
+
+不产生 `nextCursor` / `state` 的工具不会带这两个字段。
+
+### `forum_list_threads`
+
+```ts
+forum_list_threads({
+  siteKey: string,
+  boardName: string,                       // 严格等值匹配 boards.name
+  mode?: 'incremental' | 'pages',          // 默认 'incremental'
+  pages?: number,                          // 'pages' 模式生效；默认 3
+  cursor?: { startPage: number }           // 'pages' 模式续翻
+})
+```
+
+- **`incremental`**（默认）：从第 1 页开始抓，遇到 `posted_at <= 已存 watermark` 的帖子即停。**置顶帖不会触发停止**，也**不参与 watermark 推进**（它们的日期是任意旧值）。日常"看看有没有新帖"用这个。
+- **`pages`**：从 `cursor.startPage`（默认 1）开始抓 `pages` 页。回包带 `nextCursor`，agent 可以继续往历史里翻。想找更早的老帖用这个。
+
+每条结果的 `raw.threadId` 是形如 `"{boardKey}/{articleId}"` 的不透明字符串——直接传回给 `forum_get_thread`。
+
+### `forum_get_thread`
+
+```ts
+forum_get_thread({ siteKey: string, threadId: string })   // threadId = "{boardKey}/{articleId}"
+```
 
 ## 配置
 
@@ -92,11 +145,12 @@ npm run start
 
 | 变量 | 说明 |
 |---|---|
-| `PGDATA` | PGlite 数据存储目录（默认 `./.pglite`） |
+| `PGDATA_DIR` | PGlite 数据存储目录（默认 `./.pgdata`） |
 | `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | 每个站点的凭据和地址，如 `SCHOOL_BBS_USERNAME` |
 | `BROWSER_HEADLESS` | 调试时设 `false`（默认 `true`） |
 | `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | 每站点的礼貌策略（默认 1500 / 1000 / 1） |
-| `STORAGE_STATE_DIR` | Playwright `storageState.json` 文件目录（默认 `./.state`） |
+| `STORAGE_STATE_DIR` | `storageState.json` 与 `*.credentials.enc` 的目录（默认 `./.state`） |
+| `CRED_KEY` | 可选。凭据加密的 AES key 派生种子。未设置时使用主机名派生的种子（单机使用足够）。 |
 | `LOG_LEVEL` | `debug` 时启用失败截图，写到 `./.state/debug/` |
 
 `.env` 和 `./.state/` 都在 `.gitignore` 中。仓库只提交 `.env.example`。
@@ -182,13 +236,21 @@ scripts/             一次性 CLI 工具（login-once、inspect）
 
 ## Roadmap
 
-GitHub issue 跟踪：
+已完成：
 
-- [#1 Investigate forum page structure and authentication](https://github.com/VeinsureLee/BBS_Crawler/issues/1)
-- [#2 Implement browser-based login and session persistence](https://github.com/VeinsureLee/BBS_Crawler/issues/2)
-- [#3 Implement post list and content crawling](https://github.com/VeinsureLee/BBS_Crawler/issues/3)
+- 登录 + 会话持久化（`storageState.json`）
+- 加密"记住密码"凭据缓存 + 自动重登
+- 论坛结构爬取（分区 / 二级分区 / 版面 / 置顶帖）
+- `forum_list_threads` 的 `incremental` / `pages` 双模式 + 每版面爬取进度跟踪（`board_crawl_state` 表）
+- `forum_get_thread` 通过复合 `{boardKey}/{articleId}` 标识取帖
+- 4 个稳定的错误码（`SESSION_EXPIRED` / `LOGIN_FAILED` / `BOARD_NOT_FOUND` / `FETCH_FAILED`）
 
-v1 范围外（已显式延后）：验证码 / SSO / 2FA、低层 `browser_*` MCP tool、`school-bbs` 之外的更多站点、中文分词 FTS、定时调度器、分布式部署。
+下一步：
+
+- 首次 MCP 工具调用时自动触发初始化（agent 不再需要知道 `npm run init:*` 的存在）
+- 修复 `tests/unit/repository/**` 单元测试套件（PGlite 迁移后被排除，需要重写）
+
+v1 范围外（已显式延后）：验证码 / SSO / 2FA、低层 `browser_*` MCP tool、`school-bbs` 之外的更多站点、中文分词 FTS、定时调度器、分布式部署、MCP 内的搜索/缓存读取工具（由 `BBS_Database` 负责）。
 
 ## 隐私
 
