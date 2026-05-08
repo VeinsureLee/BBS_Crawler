@@ -3,41 +3,47 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": "dist/index.js",
   "engines": {
     "node": ">=20"
   },
+  "pkg": {
+    "assets": [
+      "node_modules/@electric-sql/pglite/**/*",
+      "node_modules/@modelcontextprotocol/**/*"
+    ],
+    "scripts": [],
+    "outputPath": "release",
+    "targets": ["node20-win-x64", "node20-linux-x64", "node20-macos-x64"]
+  },
   "scripts": {
+    "prepackage": "npm run build",
+    "package": "tsx scripts/package/standalone.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:tsc": "tsc -p tsconfig.json --noEmit",
-
     "login": "tsx scripts/auth/do-login.ts",
     "login:once": "tsx scripts/auth/login-once.ts",
-
     "init:sections": "tsx scripts/init/init-sections.ts",
     "init:boards": "tsx scripts/init/init-boards.ts",
     "init:pinned": "tsx scripts/init/init-pinned.ts",
     "init": "npm run init:sections && npm run init:boards && npm run init:pinned",
-
     "db:check": "tsx scripts/db/check-db.ts",
     "db:migrate:up": "tsx scripts/db/migrate.ts up",
     "db:migrate:down": "tsx scripts/db/migrate.ts down",
     "db:migrate:status": "tsx scripts/db/migrate.ts status",
     "db:delete-pinned": "tsx scripts/db/delete-pinned.ts",
-
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
     "crawl:pinned": "tsx scripts/crawl/crawl-pinned.ts",
     "crawl:board-skip": "tsx scripts/crawl/crawl-board-with-skip.ts",
-
     "debug:board": "tsx scripts/debug/debug-board.ts",
     "debug:failed-boards": "tsx scripts/debug/explore-failed-boards.ts",
     "debug:find-thread": "tsx scripts/debug/find-thread.ts",
     "debug:inspect": "tsx scripts/debug/inspect-forum.ts",
-
     "explore": "tsx scripts/util/explore.ts",
     "format:html": "tsx scripts/util/format-html.ts"
   },
@@ -53,6 +59,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
+    "@yao-pkg/pkg": "^6.19.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",
     "vitest": "^2.0.5"
