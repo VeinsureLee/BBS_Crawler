@@ -71,15 +71,6 @@ async function main(): Promise<void> {
   registerTools(server, {
     crawler,
     storageStatePathFor: (siteKey) => browserPool.storageStatePathFor(siteKey),
-    reloginForcefully: async (siteKey) => {
-      await browserPool.wipeStorageState(siteKey);
-      const ctx = await browserPool.acquire(siteKey);
-      try {
-        const page = await ctx.context.newPage();
-        try { await auth.ensureLoggedIn(page, getAdapter(siteKey)); }
-        finally { await page.close().catch(() => {}); }
-      } finally { ctx.release(); }
-    },
     isLoggedIn: async (siteKey) => {
       const ctx = await browserPool.acquire(siteKey);
       try {
