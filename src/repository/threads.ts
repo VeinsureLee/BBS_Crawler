@@ -1,6 +1,6 @@
 import { getPool } from './db';
 import { DatabaseError } from '../core/errors';
-import type { Thread } from '../core/site-adapter';
+import type { Thread, ThreadSummary } from '../core/site-adapter';
 
 export interface UpsertThreadResult { threadId: number; }
 
@@ -153,4 +153,57 @@ export async function upsertThread(
 
 function threadAuthor(t: Thread): string | null {
   return t.posts[0]?.author ?? null;
+}
+
+/**
+ * Lightweight upsert for thread-list rows (no post bodies). Used by
+ * forum_list_threads which only knows summary metadata.
+ *
+ * Behavior:
+ *   - is_pinned uses the same OR-merge as upsertThread (never downgrades a
+ *     thread that init already marked pinned).
+ *   - reply_count / last_reply_at / posted_at update only when the new value
+ *     is provided; existing values are preserved otherwise.
+ *   - last_fetched_at is bumped to now() to reflect this row was just seen.
+ */
+export async function upsertThreadSummary(
+  siteKey: string,
+  s: ThreadSummary,
+  options: UpsertThreadOptions = {},
+): Promise<UpsertThreadResult> {
+  const isPinned = options.isPinned ?? false;
+  try {
+    const r = await getPool().query<{ id: string }>(
+      `INSERT INTO threads
+        (site_key, url, title, author, board_key,
+         posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+       ON CONFLICT (site_key, url) DO UPDATE
+         SET title          = EXCLUDED.title,
+             author         = COALESCE(EXCLUDED.author, threads.author),
+             board_key      = COALESCE(EXCLUDED.board_key, threads.board_key),
+             posted_at      = COALESCE(EXCLUDED.posted_at, threads.posted_at),
+             last_reply_at  = COALESCE(EXCLUDED.last_reply_at, threads.last_reply_at),
+             reply_count    = COALESCE(EXCLUDED.reply_count, threads.reply_count),
+             view_count     = COALESCE(EXCLUDED.view_count, threads.view_count),
+             raw            = COALESCE(EXCLUDED.raw, threads.raw),
+             is_pinned      = threads.is_pinned OR EXCLUDED.is_pinned,
+             last_fetched_at = now()
+       RETURNING id`,
+      [
+        siteKey, s.url, s.title,
+        s.author ?? null,
+        s.board ?? null,
+        s.postedAt ?? null,
+        s.lastReplyAt ?? null,
+        s.replyCount ?? null,
+        s.viewCount ?? null,
+        s.raw ? JSON.stringify(s.raw) : null,
+        isPinned,
+      ],
+    );
+    return { threadId: Number(r.rows[0]!.id) };
+  } catch (e) {
+    throw new DatabaseError(`upsertThreadSummary failed for ${s.url}`, e);
+  }
 }
