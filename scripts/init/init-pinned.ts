@@ -35,7 +35,6 @@ import { upsertThread } from '../../src/repository/threads';
 import { upsertPosts } from '../../src/repository/posts';
 
 const PROGRESS_FILE = './.init-pinned.progress.json';
-const MAX_RETRY_PASSES = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -224,6 +223,7 @@ async function main() {
   const concurrency = concurrencyOverride ?? siteConfig.crawl.concurrency;
   const requestIntervalMs = siteConfig.crawl.requestIntervalMs;
   const maxPinnedThreadPages = siteConfig.crawl.maxPinnedThreadPages;
+  const maxRetryPasses = siteConfig.crawl.maxRetryPasses;
 
   let boards = await listBoards(siteKey);
   const progress = readProgress();
@@ -284,10 +284,10 @@ async function main() {
 
     // Retry passes with concurrency=1
     let retryPass = 0;
-    while (failedBoards.length > 0 && retryPass < MAX_RETRY_PASSES) {
+    while (failedBoards.length > 0 && retryPass < maxRetryPasses) {
       retryPass++;
       console.log(
-        `\n=== Retry pass ${retryPass}/${MAX_RETRY_PASSES}: ${failedBoards.length} failed boards with concurrency=1`,
+        `\n=== Retry pass ${retryPass}/${maxRetryPasses}: ${failedBoards.length} failed boards with concurrency=1`,
       );
       const boardsToRetry = [...failedBoards];
       failedBoards = await runPass(
@@ -298,7 +298,7 @@ async function main() {
 
     if (failedBoards.length > 0) {
       console.log(
-        `\nWARNING: ${failedBoards.length} boards still failed after ${MAX_RETRY_PASSES} retries:`,
+        `\nWARNING: ${failedBoards.length} boards still failed after ${maxRetryPasses} retries:`,
       );
       for (const b of failedBoards) {
         console.log(`  - ${b.boardKey}`);

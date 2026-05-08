@@ -44,3 +44,5 @@ crawl:
   pageTurnIntervalMs: 100
   # Maximum number of pages to crawl for a pinned thread (truncates long threads).
   maxPinnedThreadPages: 10
+  # Maximum number of retry passes for failed boards (each retry uses concurrency=1).
+  maxRetryPasses: 3

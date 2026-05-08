@@ -40,6 +40,7 @@ const CrawlSchema = z.object({
   structureRequestIntervalMs: z.number().int().nonnegative().default(1500),
   pageTurnIntervalMs: z.number().int().nonnegative().default(400),
   maxPinnedThreadPages: z.number().int().positive().default(10),
+  maxRetryPasses: z.number().int().nonnegative().default(3),
 });
 
 const SiteConfigSchema = z.object({
