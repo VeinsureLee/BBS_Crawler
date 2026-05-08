@@ -16,6 +16,7 @@ import { shouldSkipFetch, upsertThreadSummary } from '../repository/threads';
 import { findBoardByName } from '../repository/boards-lookup';
 import { getBoardCrawlState, upsertBoardCrawlState } from '../repository/board-crawl-state';
 import { McpToolError } from '../server/error-codes';
+import type { InitOrchestrator } from './init-orchestrator';
 
 export interface CrawlerServiceDeps {
   rateLimiter: { acquire: (siteKey: string) => Promise<() => void> };
@@ -43,6 +44,11 @@ export interface CrawlerServiceDeps {
   }) => Promise<void>;
   /** Test seam — production uses real setTimeout. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Optional. When present, ensureInitialized is called at the top of every
+   * tool invocation so first-time agents get a fresh DB without manual setup.
+   */
+  initOrchestrator?: Pick<InitOrchestrator, 'ensureInitialized'>;
 }
 
 export interface FetchThreadInput { siteKey: string; url: string; maxReplies?: number | undefined; persist?: boolean | undefined; }
@@ -298,6 +304,12 @@ export class CrawlerService {
     args: Record<string, unknown>,
     body: (page: Page, adapter: SiteAdapter) => Promise<T>,
   ): Promise<T> {
+    // Lazy first-time / partial init. No-op once the orchestrator has cached
+    // the success for this siteKey. Skipped entirely when no orchestrator is
+    // wired in (e.g. some unit tests).
+    if (this.deps.initOrchestrator) {
+      await this.deps.initOrchestrator.ensureInitialized(siteKey);
+    }
     const started = Date.now();
     let lastErr: unknown;
 
