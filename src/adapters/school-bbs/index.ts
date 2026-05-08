@@ -12,6 +12,9 @@ import type {
 import { register } from '../../core/registry';
 import { loadSiteConfig, buildRouteUrl } from '../../core/site-config';
 import type { SectionChildren, Post } from '../../core/site-adapter';
+import { listThreads as listThreadsImpl, fetchBoardPage } from './listThreads';
+
+export { fetchBoardPage };
 
 const cfg = loadSiteConfig('school-bbs');
 const ui = cfg.selectors;
@@ -170,8 +173,7 @@ async function listSectionChildren(page: Page, sectionKey: string): Promise<Sect
 }
 
 async function listThreads(page: Page, params: ListParams): Promise<ThreadSummary[]> {
-  // TODO: implement after analyzing board pages
-  return [];
+  return listThreadsImpl(page, params);
 }
 
 /**
