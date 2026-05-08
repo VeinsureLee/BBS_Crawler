@@ -1,10 +1,12 @@
 /**
- * Fetch a single section page using a saved storage state and dump the HTML
- * to exploration/section/ for offline analysis.
+ * Fetch the first page of a board (thread list) and dump the HTML to
+ * exploration/board/ for offline analysis.
  *
  * Usage:
- *   npx tsx scripts/crawl-section.ts <sectionPath>
- *   e.g. npx tsx scripts/crawl-section.ts /section/3
+ *   npx tsx scripts/crawl-board.ts <boardPath>
+ *   e.g. npx tsx scripts/crawl-board.ts /board/BYRatSH
+ *
+ * The site is a hashbang SPA, so /board/X is reached as <baseUrl>/#!board/X.
  *
  * Requires:
  *   - SCHOOL_BBS_BASE_URL in .env
@@ -14,13 +16,13 @@ import 'dotenv/config';
 import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadSiteConfig, buildRouteUrl } from '../src/core/site-config';
+import { loadSiteConfig, buildRouteUrl } from '../../src/core/site-config';
 
 const config = loadSiteConfig('school-bbs');
 const ui = config.selectors;
 
 const EXPLORATION_DIR = path.join(process.cwd(), 'exploration');
-const SECTION_DIR = path.join(EXPLORATION_DIR, 'section');
+const BOARD_DIR = path.join(EXPLORATION_DIR, 'board');
 
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -35,10 +37,10 @@ function normalizeHtml(content: string): string {
 }
 
 async function main() {
-  const sectionPath = process.argv[2];
-  if (!sectionPath || !sectionPath.startsWith('/')) {
-    console.error('Usage: tsx scripts/crawl-section.ts <sectionPath>');
-    console.error('  sectionPath must start with "/", e.g. /section/3');
+  const boardPath = process.argv[2];
+  if (!boardPath || !boardPath.startsWith('/')) {
+    console.error('Usage: tsx scripts/crawl-board.ts <boardPath>');
+    console.error('  boardPath must start with "/", e.g. /board/BYRatSH');
     process.exit(1);
   }
 
@@ -56,7 +58,7 @@ async function main() {
     process.exit(1);
   }
 
-  ensureDir(SECTION_DIR);
+  ensureDir(BOARD_DIR);
 
   const browser = await chromium.launch({
     headless: true,
@@ -66,37 +68,34 @@ async function main() {
   const page = await ctx.newPage();
 
   try {
-    // Build the SPA hashbang URL from the route template in site config.
-    const sectionKey = sectionPath.replace(/^\/section\//, '').replace(/\/+$/, '');
-    if (!sectionKey) {
-      console.error('sectionPath must look like "/section/<key>"');
+    const boardKey = boardPath.replace(/^\/board\//, '').replace(/\/+$/, '');
+    if (!boardKey) {
+      console.error('boardPath must look like "/board/<key>"');
       process.exit(1);
     }
-    const target = buildRouteUrl(baseUrl, config.routes.section, { key: sectionKey });
+    const target = buildRouteUrl(baseUrl, config.routes.board, { key: boardKey });
 
-    console.log(`Navigating to section page...`);
+    console.log(`Navigating to board page...`);
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    // Wait for the SPA to inject the board rows before snapshotting.
-    await page.waitForSelector(ui.section.boardRowReady, { timeout: 15000 });
-    // small buffer to let remaining rows finish rendering
+    // Wait for the SPA to inject thread rows before snapshotting.
+    await page.waitForSelector(ui.board.threadRowReady, { timeout: 15000 });
     await page.waitForTimeout(500);
 
     const finalUrl = page.url();
     const title = await page.title();
     const html = normalizeHtml(await page.content());
 
-    // file name: /section/3 -> section_3.html
-    const slug = sectionPath.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\//g, '_');
-    const htmlPath = path.join(SECTION_DIR, `${slug}.html`);
-    const metaPath = path.join(SECTION_DIR, `${slug}.meta.json`);
+    const slug = boardPath.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\//g, '_');
+    const htmlPath = path.join(BOARD_DIR, `${slug}.html`);
+    const metaPath = path.join(BOARD_DIR, `${slug}.meta.json`);
 
     fs.writeFileSync(htmlPath, html, 'utf-8');
     fs.writeFileSync(
       metaPath,
       JSON.stringify(
         {
-          sectionPath,
+          boardPath,
           finalUrl,
           title,
           savedAt: new Date().toISOString(),
@@ -118,6 +117,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Crawl section failed:', err);
+  console.error('Crawl board failed:', err);
   process.exit(1);
 });

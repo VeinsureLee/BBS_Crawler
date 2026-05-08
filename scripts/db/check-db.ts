@@ -8,7 +8,7 @@
  * known table. Creates the data dir on first run if missing.
  */
 import 'dotenv/config';
-import { initDb, closeDb } from '../src/repository/db';
+import { initDb, closeDb } from '../../src/repository/db';
 
 const TABLES = [
   'sites',

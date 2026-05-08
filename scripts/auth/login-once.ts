@@ -1,10 +1,10 @@
 import 'dotenv/config';
-import { parseConfig } from '../src/core/config.js';
-import { BrowserPool } from '../src/core/browser-pool.js';
-import { AuthManager } from '../src/core/auth-manager.js';
-import { getAdapter } from '../src/core/registry.js';
-import { addRedactedSecret } from '../src/util/logger.js';
-import '../src/adapters/index.js';
+import { parseConfig } from '../../src/core/config.js';
+import { BrowserPool } from '../../src/core/browser-pool.js';
+import { AuthManager } from '../../src/core/auth-manager.js';
+import { getAdapter } from '../../src/core/registry.js';
+import { addRedactedSecret } from '../../src/util/logger.js';
+import '../../src/adapters/index.js';
 
 const siteKey = process.argv[2];
 if (!siteKey) {

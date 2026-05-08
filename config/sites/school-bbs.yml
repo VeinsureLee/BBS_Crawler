@@ -25,6 +25,8 @@ selectors:
     loggedInIndicator: '#u_login'
   section:
     boardRowReady: 'td.title_1'
+    # Top-level sections in the left nav on the homepage.
+    sectionLinks: '#xlist a[href^="/section/"]'
   board:
     threadRowReady: 'a[href^="/article/"]'
 
@@ -32,3 +34,13 @@ crawl:
   # How many pages to crawl per board on each run. Plain page count, no
   # incremental cursor logic at this stage.
   boardPages: 3
+  # Number of concurrent workers to use for crawling pinned threads.
+  concurrency: 1
+  # Interval in milliseconds between requests when crawling threads/posts.
+  requestIntervalMs: 300
+  # Interval in milliseconds between requests when crawling site structure (sections/boards).
+  structureRequestIntervalMs: 1500
+  # Interval in milliseconds between page turns when crawling a multi-page thread.
+  pageTurnIntervalMs: 100
+  # Maximum number of pages to crawl for a pinned thread (truncates long threads).
+  maxPinnedThreadPages: 10

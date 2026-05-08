@@ -9,6 +9,9 @@ export interface SiteAdapter {
   isLoggedIn(page: Page): Promise<boolean>;
   login(page: Page, credentials: LoginCredentials): Promise<void>;
 
+  listSections?(page: Page): Promise<SectionSummary[]>;
+  listSectionChildren?(page: Page, sectionKey: string): Promise<SectionChildren>;
+  listPinnedThreadIds?(page: Page, boardKey: string): Promise<string[]>;
   listThreads(page: Page, params: ListParams): Promise<ThreadSummary[]>;
   getThread(page: Page, params: GetThreadParams): Promise<Thread>;
   search(page: Page, params: SearchParams): Promise<ThreadSummary[]>;
@@ -30,11 +33,39 @@ export interface ListParams {
 export interface GetThreadParams {
   url: string;
   maxReplies?: number | undefined;
+  maxPages?: number | undefined;
 }
 
 export interface SearchParams {
   keyword: string;
   page?: number | undefined;
+}
+
+export interface SectionSummary {
+  sectionKey: string;
+  name: string;
+  url: string;
+}
+
+export interface BoardStats {
+  online: number;
+  today: number;
+  threads: number;
+  posts: number;
+  snapshotAt: string;
+}
+
+export interface BoardSummary {
+  boardKey: string;
+  name: string;
+  url: string;
+  moderators: string[];
+  stats: BoardStats;
+}
+
+export interface SectionChildren {
+  subSections: SectionSummary[];
+  boards: BoardSummary[];
 }
 
 export interface ThreadSummary {
@@ -65,6 +96,7 @@ export interface Post {
   contentHtml: string;
   contentText: string;
   attachments?: PostAttachment[];
+  raw?: Record<string, unknown>;
 }
 
 export interface PostAttachment {

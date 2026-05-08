@@ -19,7 +19,7 @@
 import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
-import { initDb, closeDb } from '../src/repository/db';
+import { initDb, closeDb } from '../../src/repository/db';
 
 const MIGRATIONS_DIR = path.join(process.cwd(), 'migrations');
 

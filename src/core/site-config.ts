@@ -20,6 +20,7 @@ const LoginSelectorsSchema = z.object({
 
 const SectionSelectorsSchema = z.object({
   boardRowReady: z.string(),
+  sectionLinks: z.string(),
 });
 
 const BoardSelectorsSchema = z.object({
@@ -34,6 +35,11 @@ const RoutesSchema = z.object({
 
 const CrawlSchema = z.object({
   boardPages: z.number().int().positive(),
+  concurrency: z.number().int().positive().default(16),
+  requestIntervalMs: z.number().int().nonnegative().default(100),
+  structureRequestIntervalMs: z.number().int().nonnegative().default(1500),
+  pageTurnIntervalMs: z.number().int().nonnegative().default(400),
+  maxPinnedThreadPages: z.number().int().positive().default(10),
 });
 
 const SiteConfigSchema = z.object({

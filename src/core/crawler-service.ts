@@ -12,6 +12,7 @@ import {
   RateLimitedError,
 } from './errors';
 import { logger } from '../util/logger';
+import { shouldSkipFetch } from '../repository/threads';
 
 export interface CrawlerServiceDeps {
   rateLimiter: { acquire: (siteKey: string) => Promise<() => void> };
