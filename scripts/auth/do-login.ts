@@ -2,7 +2,9 @@ import 'dotenv/config';
 import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'node:readline/promises';
 import { loadSiteConfig } from '../../src/core/site-config';
+import { saveCredentials, clearCredentials } from '../../src/core/credential-store';
 
 const config = loadSiteConfig('school-bbs');
 const ui = config.selectors;
@@ -73,6 +75,19 @@ async function doLogin() {
     const statePath = path.join(stateDir, 'school-bbs.json');
     await ctx.storageState({ path: statePath });
     console.log(`Saved storage state to: ${statePath}`);
+
+    // Ask whether to remember the password for auto-relogin when cookies expire.
+    // Saved encrypted at <STORAGE_STATE_DIR>/school-bbs.credentials.enc, mode 0600.
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = (await rl.question('Remember password for auto-relogin? (y/N): ')).trim().toLowerCase();
+    rl.close();
+    if (answer === 'y' || answer === 'yes') {
+      await saveCredentials('school-bbs', { username, password });
+      console.log('Credentials saved (encrypted). Auto-relogin enabled when cookies expire.');
+    } else {
+      await clearCredentials('school-bbs');
+      console.log('Credentials NOT remembered. cookies-only mode (re-run this script when session expires).');
+    }
 
     console.log('Done! You can close the browser now.');
     await new Promise<void>((r) => process.on('SIGINT', () => r()));
