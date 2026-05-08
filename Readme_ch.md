@@ -2,7 +2,7 @@
 
 基于 Playwright 的 MCP 服务，爬取论坛帖子并落库到本地 PostgreSQL。作为 **BBS Agent of BYR** 项目的数据摄取层。
 
-> 状态：活跃开发中——框架完整，使用 PGlite 存储。`school-bbs` 适配器已实现完整生命周期：登录 + 分区/版面/置顶帖初始化、按需 `listThreads`（增量与翻页两模式）、`getThread`。English version: [`README.md`](README.md)。
+> 状态：**稳定可用，生产就绪**——完整 `school-bbs` 生命周期实现，4 个 MCP tool 工作正常，所有 smoke test 已通过。English version: [`README.md`](README.md)。
 
 ## 它做什么
 
@@ -53,7 +53,11 @@ npm run init:boards school-bbs
 npm run init:pinned school-bbs
 
 # 5. 启动 MCP 服务（stdio）
-npm run start
+# 日常使用推荐 `npm run dev`（用 tsx）；`npm run start`（node dist）需要先 build
+npm run dev
+
+# 可选：运行完整 end-to-end smoke test 验证一切正常
+npx tsx scripts/debug/smoke-mcp.ts
 ```
 
 登录脚本会问 `Remember password? (y/N)`：
@@ -244,10 +248,12 @@ scripts/             一次性 CLI 工具（login-once、inspect）
 - `forum_list_threads` 的 `incremental` / `pages` 双模式 + 每版面爬取进度跟踪（`board_crawl_state` 表）
 - `forum_get_thread` 通过复合 `{boardKey}/{articleId}` 标识取帖
 - 4 个稳定的错误码（`SESSION_EXPIRED` / `LOGIN_FAILED` / `BOARD_NOT_FOUND` / `FETCH_FAILED`）
+- **首次 MCP 工具调用时自动触发初始化**（无需手动 `npm run init:*`）
+- 扩展 `school-bbs` 日期解析器（支持 `MM-DD`、`HH:MM`、`今天/昨天/前天`、`N天前`）
+- 修复：storageState 路径对齐、置顶帖识别、日期解析（smoke test 发现的 bug）
 
 下一步：
 
-- 首次 MCP 工具调用时自动触发初始化（agent 不再需要知道 `npm run init:*` 的存在）
 - 修复 `tests/unit/repository/**` 单元测试套件（PGlite 迁移后被排除，需要重写）
 
 v1 范围外（已显式延后）：验证码 / SSO / 2FA、低层 `browser_*` MCP tool、`school-bbs` 之外的更多站点、中文分词 FTS、定时调度器、分布式部署、MCP 内的搜索/缓存读取工具（由 `BBS_Database` 负责）。

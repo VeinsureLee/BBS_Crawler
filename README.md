@@ -2,7 +2,7 @@
 
 A Playwright-based MCP server that crawls forum posts and persists them to a local PostgreSQL database. Designed as the data-ingestion layer of the **BBS Agent of BYR** project.
 
-> Status: active development — framework complete with PGlite storage. The `school-bbs` adapter implements full lifecycle: login + sections/boards/pinned init, plus on-demand `listThreads` (incremental & paged) and `getThread`. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
+> Status: **stable, production-ready** — full `school-bbs` lifecycle complete, 4 MCP tools working, all smoke tests passing. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
 
 ## What it does
 
@@ -53,7 +53,11 @@ npm run init:boards school-bbs
 npm run init:pinned school-bbs
 
 # 5. run as MCP server (stdio)
-npm run start
+# Recommend `npm run dev` (uses tsx) for daily use; `npm run start` (node dist) requires a build first
+npm run dev
+
+# Optional: run end-to-end smoke test to verify everything works
+npx tsx scripts/debug/smoke-mcp.ts
 ```
 
 The login flow asks `Remember password? (y/N)`. Choosing `y` writes encrypted credentials to `./.state/<siteKey>.credentials.enc` (AES-256-GCM, mode 0600). When cookies later expire, the auth manager auto-relogins from the cached credentials and the agent never sees a `SESSION_EXPIRED`. Choosing `N` keeps cookies-only mode — re-run `npm run login` whenever the session lapses.
@@ -242,10 +246,12 @@ Already landed:
 - `forum_list_threads` with `incremental` / `pages` modes and per-board crawl-state tracking
 - `forum_get_thread` by composite `{boardKey}/{articleId}` id
 - 4 stable error codes (`SESSION_EXPIRED` / `LOGIN_FAILED` / `BOARD_NOT_FOUND` / `FETCH_FAILED`)
+- **Auto-init on first MCP tool call** (no manual `npm run init:*` required)
+- Expanded date parser for `school-bbs` (handles `MM-DD`, `HH:MM`, `今天/昨天/前天`, `N天前`)
+- Fixed: storageState path alignment, pinned thread detection, date parsing (smoke test bugs)
 
 Next up:
 
-- Auto-init on first MCP tool call (so the agent never needs to know about `npm run init:*`)
 - Restore the unit test suite for `tests/unit/repository/**` (currently excluded after the PGlite migration)
 
 Out of scope for v1 (deferred): CAPTCHA / SSO / 2FA login, low-level `browser_*` MCP tools, additional site adapters beyond `school-bbs`, Chinese tokenizer FTS, background scheduler, multi-worker deployment, in-MCP search / cache-read tools (handled by `BBS_Database`).
