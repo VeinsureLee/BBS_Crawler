@@ -2,14 +2,14 @@
 
 基于 Playwright 的 MCP 服务，爬取论坛帖子并落库到本地 PostgreSQL。作为 **BBS Agent of BYR** 项目的数据摄取层。
 
-> 状态：早期开发中——框架脚手架进行中，尚未交付任何站点适配器。English version: [`README.md`](README.md)。
+> 状态：活跃开发中——框架完成，使用 PGlite 存储，`school-bbs` 适配器部分实现（分区/版面/置顶帖爬取可用，listThreads/search 待实现）。English version: [`README.md`](README.md)。
 
 ## 它做什么
 
 - 暴露一组高层 MCP tool（`forum_search` / `forum_list_threads` / `forum_get_thread` 等），供自定义 agent 按需爬取论坛内容。
 - 通过 Playwright 驱动真实 Chromium 浏览器，能拿到登录后才可见的页面。
 - 用 Playwright 的 `storageState` 持久化登录会话——agent 不需要每次都重新提交账密。
-- 可选地把抓取到的内容写入 PostgreSQL（`persist: true`），后续给 RAG / 批量处理使用。
+- 可选地把抓取到的内容写入嵌入式 PGlite 数据库（`persist: true`），后续给 RAG / 批量处理使用。
 - 站点适配器可插拔：内置 `school-bbs` 适配器；新站点只需在 `src/adapters/<site>/` 下加一个文件。
 
 ## 在生态里的位置
@@ -26,14 +26,11 @@
 
 - TypeScript（Node 20+）
 - [Playwright](https://playwright.dev/)（仅 chromium）
-- PostgreSQL 14+
+- [PGlite](https://pglite.dev/)（嵌入式 PostgreSQL，无需外部数据库）
 - [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk)（stdio 传输）
-- `pg` + `node-pg-migrate`（不引 ORM）
 - `zod` 做 env / 入参校验，`pino` 做结构化日志
 
 ## 快速开始
-
-> 实现尚未完成。下面的命令是目标形态，会随实现进度逐步可用。
 
 ```bash
 # 1. 安装依赖
@@ -42,12 +39,18 @@ npx playwright install chromium
 
 # 2. 配置环境
 cp .env.example .env
-# 填入 DATABASE_URL、SCHOOL_BBS_USERNAME、SCHOOL_BBS_PASSWORD
+# 填入 SCHOOL_BBS_USERNAME、SCHOOL_BBS_PASSWORD、SCHOOL_BBS_BASE_URL
+# (DATABASE_URL 可选，默认使用 ./.pglite 本地 PGlite)
 
-# 3. 跑数据库迁移
-npm run migrate:up
+# 3. 首次登录（保存登录状态）
+npm run login school-bbs
 
-# 4. 启动 MCP 服务（stdio）
+# 4. 初始化数据库结构（可选，用于全站爬取）
+npm run init:sections school-bbs
+npm run init:boards school-bbs
+npm run init:pinned school-bbs
+
+# 5. 启动 MCP 服务（stdio）
 npm run start
 ```
 
@@ -89,8 +92,8 @@ npm run start
 
 | 变量 | 说明 |
 |---|---|
-| `DATABASE_URL` | PostgreSQL 连接串（必填） |
-| `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` | 每个站点的凭据，如 `SCHOOL_BBS_USERNAME` |
+| `PGDATA` | PGlite 数据存储目录（默认 `./.pglite`） |
+| `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | 每个站点的凭据和地址，如 `SCHOOL_BBS_USERNAME` |
 | `BROWSER_HEADLESS` | 调试时设 `false`（默认 `true`） |
 | `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | 每站点的礼貌策略（默认 1500 / 1000 / 1） |
 | `STORAGE_STATE_DIR` | Playwright `storageState.json` 文件目录（默认 `./.state`） |
@@ -120,6 +123,62 @@ migrations/          node-pg-migrate 的 SQL 文件
 tests/fixtures/      脱敏 HTML 快照，驱动 adapter 集成测试
 scripts/             一次性 CLI 工具（login-once、inspect）
 ```
+
+## 脚本说明
+
+### 认证脚本
+
+| 脚本 | 用途 | 使用方法 |
+|---|---|---|
+| `login` | 交互式登录并保存 storageState | `npm run login [siteKey]` |
+| `login:once` | 非交互式登录（需要已设置环境变量） | `npm run login:once [siteKey]` |
+
+### 初始化脚本（针对 school-bbs）
+
+按顺序运行以探索并持久化论坛结构：
+
+| 脚本 | 用途 | 使用方法 |
+|---|---|---|
+| `init:sections` | 从首页爬取顶层分区并持久化到数据库 | `npm run init:sections [siteKey]` |
+| `init:boards` | 对每个分区，爬取其二级分区和版面并持久化 | `npm run init:boards [siteKey]` |
+| `init:pinned` | 对每个版面，发现置顶帖并爬取完整内容（含回复） | `npm run init:pinned [siteKey] [--limit N] [--concurrency K] [--skip-done]` |
+
+注意：`init:pinned` 有智能重试机制：在并发爬取时失败的版面会在主轮次结束后，以单线程（concurrency=1）顺序重试，最多重试 3 轮。
+
+### 爬取脚本
+
+| 脚本 | 用途 | 使用方法 |
+|---|---|---|
+| `crawl:board` | 爬取某个版面页面并保存原始 HTML 供分析 | `npx tsx scripts/crawl/crawl-board.ts <boardPath>` |
+| `crawl:section` | 爬取某个分区页面并保存原始 HTML 供分析 | `npx tsx scripts/crawl/crawl-section.ts <sectionPath>` |
+| `crawl:pinned` | 爬取某个版面的置顶帖并保存原始 HTML | `npx tsx scripts/crawl/crawl-pinned.ts <boardKey>` |
+| `crawl:board-skip` | 带跳过逻辑的版面爬取（自定义行为） | `npx tsx scripts/crawl/crawl-board-with-skip.ts` |
+
+### 调试脚本
+
+| 脚本 | 用途 | 使用方法 |
+|---|---|---|
+| `debug:board` | 交互式调试某个版面页面 | `npx tsx scripts/debug/debug-board.ts` |
+| `debug:failed-boards` | 探索爬取失败的版面 | `npx tsx scripts/debug/explore-failed-boards.ts` |
+| `debug:find-thread` | 查找并检查特定帖子 | `npx tsx scripts/debug/find-thread.ts` |
+| `debug:inspect` | 交互式检查论坛 | `npx tsx scripts/debug/inspect-forum.ts` |
+| `explore` | 通用探索工具 | `npx tsx scripts/util/explore.ts` |
+
+### 数据库脚本
+
+| 脚本 | 用途 | 使用方法 |
+|---|---|---|
+| `db:check` | 验证数据库连接和 schema | `npm run db:check` |
+| `db:migrate:up` | 运行待处理的数据库迁移 | `npm run db:migrate:up` |
+| `db:migrate:down` | 回滚上一个迁移 | `npm run db:migrate:down` |
+| `db:migrate:status` | 显示迁移状态 | `npm run db:migrate:status` |
+| `db:delete-pinned` | 删除置顶帖记录（用于重新爬取） | `npm run db:delete-pinned` |
+
+### 工具脚本
+
+| 脚本 | 用途 | 使用方法 |
+|---|---|---|
+| `format:html` | 格式化原始 HTML 文件以提高可读性 | `npx tsx scripts/util/format-html.ts <file.html>` |
 
 ## Roadmap
 

@@ -2,14 +2,14 @@
 
 A Playwright-based MCP server that crawls forum posts and persists them to a local PostgreSQL database. Designed as the data-ingestion layer of the **BBS Agent of BYR** project.
 
-> Status: early development — framework scaffolding in progress, no site adapter shipped yet. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
+> Status: active development — framework complete with PGlite storage, `school-bbs` adapter partially implemented (sections/boards/pinned threads crawling works, listThreads/search TBD). See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
 
 ## What it does
 
 - Exposes a small set of high-level MCP tools (`forum_search`, `forum_list_threads`, `forum_get_thread`, ...) so a custom agent can crawl forum content on demand.
 - Drives a real Chromium browser via Playwright so login-gated pages are reachable.
 - Persists login sessions via Playwright `storageState` — the agent never re-submits credentials on every call.
-- Optionally writes crawled content to PostgreSQL (`persist: true`) for later RAG / batch use.
+- Optionally writes crawled content to embedded PGlite database (`persist: true`) for later RAG / batch use.
 - Pluggable site adapters: ships with a `school-bbs` adapter; new sites are added by dropping a file under `src/adapters/<site>/`.
 
 ## How it fits the ecosystem
@@ -26,14 +26,11 @@ This crawler **owns** the PostgreSQL schema for forum content. `BBS_Database` re
 
 - TypeScript (Node 20+)
 - [Playwright](https://playwright.dev/) (Chromium only)
-- PostgreSQL 14+
+- [PGlite](https://pglite.dev/) (embedded PostgreSQL, no external DB required)
 - [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) for MCP transport (stdio)
-- `pg` + `node-pg-migrate` (no ORM)
 - `zod` for env / input validation, `pino` for structured logging
 
 ## Quick start
-
-> Implementation is incomplete. The commands below are the target shape; expect some to land progressively as the implementation plan is executed.
 
 ```bash
 # 1. install
@@ -42,12 +39,18 @@ npx playwright install chromium
 
 # 2. configure
 cp .env.example .env
-# fill in DATABASE_URL, SCHOOL_BBS_USERNAME, SCHOOL_BBS_PASSWORD
+# fill in SCHOOL_BBS_USERNAME, SCHOOL_BBS_PASSWORD, SCHOOL_BBS_BASE_URL
+# (DATABASE_URL is optional, defaults to local PGlite in ./.pglite)
 
-# 3. migrate
-npm run migrate:up
+# 3. first-time login (saves storage state)
+npm run login school-bbs
 
-# 4. run as MCP server (stdio)
+# 4. initialize DB structure (optional, for full-site crawling)
+npm run init:sections school-bbs
+npm run init:boards school-bbs
+npm run init:pinned school-bbs
+
+# 5. run as MCP server (stdio)
 npm run start
 ```
 
@@ -60,9 +63,9 @@ To plug into a Claude Code / Claude Desktop / custom agent, register the binary 
       "command": "node",
       "args": ["d:/MyProject/Python_Project/BBS_Crawler/dist/index.js"],
       "env": {
-        "DATABASE_URL": "postgres://crawler:***@localhost:5432/bbs_crawler",
         "SCHOOL_BBS_USERNAME": "...",
-        "SCHOOL_BBS_PASSWORD": "..."
+        "SCHOOL_BBS_PASSWORD": "...",
+        "SCHOOL_BBS_BASE_URL": "..."
       }
     }
   }
@@ -89,8 +92,8 @@ All secrets live in environment variables. The headline ones:
 
 | Var | Purpose |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection (required) |
-| `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` | Per-site credentials, e.g. `SCHOOL_BBS_USERNAME` |
+| `PGDATA` | Path for PGlite storage directory (default: `./.pglite`) |
+| `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | Per-site credentials and base URL, e.g. `SCHOOL_BBS_USERNAME` |
 | `BROWSER_HEADLESS` | `false` for visual debugging (default `true`) |
 | `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | Per-site politeness knobs (defaults: 1500 / 1000 / 1) |
 | `STORAGE_STATE_DIR` | Where Playwright `storageState.json` files are kept (default `./.state`) |
@@ -120,6 +123,62 @@ migrations/          node-pg-migrate SQL files
 tests/fixtures/      redacted HTML snapshots driving adapter integration tests
 scripts/             one-shot CLI helpers (login-once, inspect)
 ```
+
+## Scripts
+
+### Authentication scripts
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `login` | Perform interactive login and save storageState | `npm run login [siteKey]` |
+| `login:once` | Non-interactive login (requires env vars set) | `npm run login:once [siteKey]` |
+
+### Initialization scripts (for school-bbs)
+
+Run these in order to explore and persist the forum structure:
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `init:sections` | Crawl top-level sections from homepage and persist to DB | `npm run init:sections [siteKey]` |
+| `init:boards` | For each section, crawl its subsections and boards and persist to DB | `npm run init:boards [siteKey]` |
+| `init:pinned` | For each board, discover pinned threads and crawl them with replies | `npm run init:pinned [siteKey] [--limit N] [--concurrency K] [--skip-done]` |
+
+Note: `init:pinned` has smart retry handling: boards that fail during concurrent crawl are retried sequentially (concurrency=1) in up to 3 retry passes.
+
+### Crawling scripts
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `crawl:board` | Crawl a specific board page and save raw HTML for inspection | `npx tsx scripts/crawl/crawl-board.ts <boardPath>` |
+| `crawl:section` | Crawl a specific section page and save raw HTML for inspection | `npx tsx scripts/crawl/crawl-section.ts <sectionPath>` |
+| `crawl:pinned` | Crawl pinned threads from a board and save raw HTMLs | `npx tsx scripts/crawl/crawl-pinned.ts <boardKey>` |
+| `crawl:board-skip` | Crawl a board with skip logic (custom behavior) | `npx tsx scripts/crawl/crawl-board-with-skip.ts` |
+
+### Debug scripts
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `debug:board` | Debug a specific board page interactively | `npx tsx scripts/debug/debug-board.ts` |
+| `debug:failed-boards` | Explore boards that failed during crawl | `npx tsx scripts/debug/explore-failed-boards.ts` |
+| `debug:find-thread` | Find and inspect a specific thread | `npx tsx scripts/debug/find-thread.ts` |
+| `debug:inspect` | Inspect the forum interactively | `npx tsx scripts/debug/inspect-forum.ts` |
+| `explore` | General exploration utility | `npx tsx scripts/util/explore.ts` |
+
+### Database scripts
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `db:check` | Verify database connection and schema | `npm run db:check` |
+| `db:migrate:up` | Run pending database migrations | `npm run db:migrate:up` |
+| `db:migrate:down` | Roll back last migration | `npm run db:migrate:down` |
+| `db:migrate:status` | Show migration status | `npm run db:migrate:status` |
+| `db:delete-pinned` | Delete pinned thread records (for re-crawl) | `npm run db:delete-pinned` |
+
+### Utility scripts
+
+| Script | Purpose | Usage |
+|---|---|---|
+| `format:html` | Format raw HTML files for readability | `npx tsx scripts/util/format-html.ts <file.html>` |
 
 ## Roadmap (live)
 

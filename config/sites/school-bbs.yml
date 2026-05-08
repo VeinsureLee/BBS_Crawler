@@ -35,7 +35,7 @@ crawl:
   # incremental cursor logic at this stage.
   boardPages: 3
   # Number of concurrent workers to use for crawling pinned threads.
-  concurrency: 1
+  concurrency: 16
   # Interval in milliseconds between requests when crawling threads/posts.
   requestIntervalMs: 300
   # Interval in milliseconds between requests when crawling site structure (sections/boards).

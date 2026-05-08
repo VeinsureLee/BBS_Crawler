@@ -15,6 +15,11 @@
  * Requires:
  *   - boards already populated by scripts/init-boards.ts
  *   - .state/<siteKey>.json from scripts/do-login.ts
+ *
+ * Failure handling:
+ *   Boards that fail during concurrent crawl are pushed to a retry stack. After the main pass,
+ *   the script retries all failed boards sequentially (and any that failed during retry)
+ *   with concurrency=1 until no failures remain or a retry limit is hit.
  */
 import 'dotenv/config';
 import '../../src/adapters/index';
@@ -30,6 +35,7 @@ import { upsertThread } from '../../src/repository/threads';
 import { upsertPosts } from '../../src/repository/posts';
 
 const PROGRESS_FILE = './.init-pinned.progress.json';
+const MAX_RETRY_PASSES = 3;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -87,6 +93,14 @@ function writeProgress(p: ProgressFile): void {
   fs.writeFileSync(PROGRESS_FILE, JSON.stringify(p, null, 2), 'utf-8');
 }
 
+interface ProcessResult {
+  success: boolean;
+  pinned?: number;
+  postsTotal?: number;
+  truncated?: number;
+  error?: string;
+}
+
 async function processBoard(
   page: Page,
   adapter: ReturnType<typeof getAdapter>,
@@ -95,32 +109,103 @@ async function processBoard(
   boardKey: string,
   requestIntervalMs: number,
   maxPinnedThreadPages: number,
-): Promise<{ pinned: number; postsTotal: number; truncated: number }> {
-  const ids = await adapter.listPinnedThreadIds!(page, boardKey);
-  if (ids.length === 0) return { pinned: 0, postsTotal: 0, truncated: 0 };
+): Promise<ProcessResult> {
+  try {
+    const ids = await adapter.listPinnedThreadIds!(page, boardKey);
+    if (ids.length === 0) return { success: true, pinned: 0, postsTotal: 0, truncated: 0 };
 
-  let postsTotal = 0;
-  let truncated = 0;
-  for (const articleId of ids) {
-    await sleep(requestIntervalMs);
-    const url = `${baseUrl.replace(/\/+$/, '')}/article/${boardKey}/${articleId}`;
-    const thread = await adapter.getThread(page, { url, maxPages: maxPinnedThreadPages });
-    // Tag pinned in raw before persist.
-    thread.raw = { ...(thread.raw ?? {}), pinned: true };
+    let postsTotal = 0;
+    let truncated = 0;
+    for (const articleId of ids) {
+      await sleep(requestIntervalMs);
+      const url = `${baseUrl.replace(/\/+$/, '')}/article/${boardKey}/${articleId}`;
+      const thread = await adapter.getThread(page, { url, maxPages: maxPinnedThreadPages });
+      // Tag pinned in raw before persist.
+      thread.raw = { ...(thread.raw ?? {}), pinned: true };
 
-    const { threadId } = await upsertThread(siteKey, thread);
-    await upsertPosts(threadId, thread.posts);
-    postsTotal += thread.posts.length;
-    const raw = thread.raw as { pageCount?: number; crawledPages?: number; truncated?: boolean };
-    const pageCount = raw.pageCount ?? 1;
-    const crawledPages = raw.crawledPages ?? pageCount;
-    const wasTruncated = raw.truncated ?? false;
-    if (wasTruncated) truncated++;
-    console.log(
-      `    [${articleId}] "${thread.title}" — ${thread.posts.length} posts across ${crawledPages}/${pageCount} page(s)${wasTruncated ? ' [TRUNCATED]' : ''}`,
-    );
+      const { threadId } = await upsertThread(siteKey, thread);
+      await upsertPosts(threadId, thread.posts);
+      postsTotal += thread.posts.length;
+      const raw = thread.raw as { pageCount?: number; crawledPages?: number; truncated?: boolean };
+      const pageCount = raw.pageCount ?? 1;
+      const crawledPages = raw.crawledPages ?? pageCount;
+      const wasTruncated = raw.truncated ?? false;
+      if (wasTruncated) truncated++;
+      console.log(
+        `    [${articleId}] "${thread.title}" — ${thread.posts.length} posts across ${crawledPages}/${pageCount} page(s)${wasTruncated ? ' [TRUNCATED]' : ''}`,
+      );
+    }
+    return { success: true, pinned: ids.length, postsTotal, truncated };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
   }
-  return { pinned: ids.length, postsTotal, truncated };
+}
+
+interface BoardWithKey {
+  boardKey: string;
+  id?: number;
+}
+
+async function runPass(
+  boards: BoardWithKey[],
+  ctx: any,
+  adapter: ReturnType<typeof getAdapter>,
+  siteKey: string,
+  baseUrl: string,
+  requestIntervalMs: number,
+  maxPinnedThreadPages: number,
+  stats: { boardsWithPinned: number; totalPinned: number; totalPosts: number; totalTruncated: number; },
+  doneSet: Set<string>,
+  progress: ProgressFile,
+  recordDone: (boardKey: string) => void,
+  concurrency: number,
+  passLabel: string,
+): Promise<BoardWithKey[]> {
+  const failed: BoardWithKey[] = [];
+  let nextIdx = 0;
+  const total = boards.length;
+
+  if (total === 0) return failed;
+
+  const runWorker = async (workerId: number, page: Page): Promise<void> => {
+    while (true) {
+      const i = nextIdx++;
+      if (i >= total) return;
+      const b = boards[i]!;
+      const result = await processBoard(
+        page, adapter, siteKey, baseUrl, b.boardKey, requestIntervalMs, maxPinnedThreadPages,
+      );
+      if (result.success) {
+        if (result.pinned === 0) {
+          console.log(`[${passLabel} w${workerId} ${i + 1}/${total}] ${b.boardKey}: 0 pinned`);
+        } else {
+          stats.boardsWithPinned++;
+          stats.totalPinned += result.pinned!;
+          stats.totalPosts += result.postsTotal!;
+          stats.totalTruncated += result.truncated!;
+          console.log(
+            `[${passLabel} w${workerId} ${i + 1}/${total}] ${b.boardKey}: ${result.pinned} pinned, ${result.postsTotal} posts${result.truncated > 0 ? ` (${result.truncated} truncated)` : ''}`,
+          );
+        }
+        recordDone(b.boardKey);
+      } else {
+        console.error(
+          `[${passLabel} w${workerId} ${i + 1}/${total}] ${b.boardKey} FAILED:`,
+          result.error,
+        );
+        failed.push(b);
+      }
+      await sleep(requestIntervalMs);
+    }
+  };
+
+  const pages: Page[] = [];
+  for (let k = 0; k < concurrency; k++) pages.push(await ctx.newPage());
+  await Promise.all(pages.map((p, i) => runWorker(i + 1, p)));
+  // Clean up pages after pass
+  for (const p of pages) await p.close();
+
+  return failed;
 }
 
 async function main() {
@@ -179,9 +264,6 @@ async function main() {
     userAgent: cfg.browserUserAgent,
   });
 
-  // Shared queue: workers pull next index until exhausted.
-  let nextIdx = 0;
-  const total = boards.length;
   const stats = { boardsWithPinned: 0, totalPinned: 0, totalPosts: 0, totalTruncated: 0 };
 
   const recordDone = (boardKey: string): void => {
@@ -191,45 +273,40 @@ async function main() {
     catch (e) { console.warn('progress write failed:', (e as Error).message); }
   };
 
-  const runWorker = async (workerId: number, page: Page): Promise<void> => {
-    while (true) {
-      const i = nextIdx++;
-      if (i >= total) return;
-      const b = boards[i]!;
-      try {
-        const { pinned, postsTotal, truncated } = await processBoard(
-          page, adapter, siteKey, baseUrl, b.boardKey, requestIntervalMs, maxPinnedThreadPages,
-        );
-        if (pinned === 0) {
-          console.log(`[w${workerId} ${i + 1}/${total}] ${b.boardKey}: 0 pinned`);
-        } else {
-          stats.boardsWithPinned++;
-          stats.totalPinned += pinned;
-          stats.totalPosts += postsTotal;
-          stats.totalTruncated += truncated;
-          console.log(
-            `[w${workerId} ${i + 1}/${total}] ${b.boardKey}: ${pinned} pinned, ${postsTotal} posts${truncated > 0 ? ` (${truncated} truncated)` : ''}`,
-          );
-        }
-        recordDone(b.boardKey);
-      } catch (err) {
-        console.error(
-          `[w${workerId} ${i + 1}/${total}] ${b.boardKey} FAILED:`,
-          (err as Error).message,
-        );
-      }
-      await sleep(requestIntervalMs);
-    }
-  };
-
-  console.log(`Starting ${concurrency} workers over ${total} boards (max ${maxPinnedThreadPages} pages/thread)`);
+  console.log(`Starting main pass with concurrency=${concurrency} over ${boards.length} boards (max ${maxPinnedThreadPages} pages/thread)`);
+  let failedBoards: BoardWithKey[] = [];
   try {
-    const pages: Page[] = [];
-    for (let k = 0; k < concurrency; k++) pages.push(await ctx.newPage());
-    await Promise.all(pages.map((p, i) => runWorker(i + 1, p)));
+    // Main pass with requested concurrency
+    failedBoards = await runPass(
+      boards, ctx, adapter, siteKey, baseUrl, requestIntervalMs, maxPinnedThreadPages,
+      stats, doneSet, progress, recordDone, concurrency, 'main',
+    );
+
+    // Retry passes with concurrency=1
+    let retryPass = 0;
+    while (failedBoards.length > 0 && retryPass < MAX_RETRY_PASSES) {
+      retryPass++;
+      console.log(
+        `\n=== Retry pass ${retryPass}/${MAX_RETRY_PASSES}: ${failedBoards.length} failed boards with concurrency=1`,
+      );
+      const boardsToRetry = [...failedBoards];
+      failedBoards = await runPass(
+        boardsToRetry, ctx, adapter, siteKey, baseUrl, requestIntervalMs, maxPinnedThreadPages,
+        stats, doneSet, progress, recordDone, 1, `retry${retryPass}`,
+      );
+    }
+
+    if (failedBoards.length > 0) {
+      console.log(
+        `\nWARNING: ${failedBoards.length} boards still failed after ${MAX_RETRY_PASSES} retries:`,
+      );
+      for (const b of failedBoards) {
+        console.log(`  - ${b.boardKey}`);
+      }
+    }
 
     console.log(
-      `\nDone. ${stats.boardsWithPinned}/${total} boards had pinned threads. ` +
+      `\nDone. ${stats.boardsWithPinned}/${boards.length} boards had pinned threads. ` +
         `${stats.totalPinned} threads, ${stats.totalPosts} posts persisted. ` +
         (stats.totalTruncated > 0 ? `${stats.totalTruncated} long threads truncated to ${maxPinnedThreadPages} pages.` : ''),
     );
