@@ -122,7 +122,7 @@ async function processBoard(
       // Tag pinned in raw before persist.
       thread.raw = { ...(thread.raw ?? {}), pinned: true };
 
-      const { threadId } = await upsertThread(siteKey, thread);
+      const { threadId } = await upsertThread(siteKey, thread, { isPinned: true });
       await upsertPosts(threadId, thread.posts);
       postsTotal += thread.posts.length;
       const raw = thread.raw as { pageCount?: number; crawledPages?: number; truncated?: boolean };
