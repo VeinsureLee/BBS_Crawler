@@ -12,7 +12,10 @@ import {
   RateLimitedError,
 } from './errors';
 import { logger } from '../util/logger';
-import { shouldSkipFetch } from '../repository/threads';
+import { shouldSkipFetch, upsertThreadSummary } from '../repository/threads';
+import { findBoardByName } from '../repository/boards-lookup';
+import { getBoardCrawlState, upsertBoardCrawlState } from '../repository/board-crawl-state';
+import { McpToolError } from '../server/error-codes';
 
 export interface CrawlerServiceDeps {
   rateLimiter: { acquire: (siteKey: string) => Promise<() => void> };
@@ -70,6 +73,38 @@ export interface SearchOutput {
   hasMore: boolean;
   persisted: boolean;
 }
+
+export interface ListThreadsByNameInput {
+  siteKey: string;
+  boardName: string;
+  mode?: 'incremental' | 'pages' | undefined;
+  pages?: number | undefined;
+  cursor?: { startPage: number } | undefined;
+}
+
+export interface ListThreadsByNameState {
+  deepestPageCrawled: number;
+  latestThreadPostedAt: string | null;
+  lastCrawledAt: string;
+}
+
+export interface ListThreadsByNameOutput {
+  threads: ThreadSummary[];
+  nextCursor: { startPage: number } | null;
+  state: ListThreadsByNameState;
+}
+
+export interface FetchThreadByIdInput {
+  siteKey: string;
+  /** Composite "{boardKey}/{articleId}" — the form returned by forum_list_threads. */
+  threadId: string;
+  maxReplies?: number | undefined;
+}
+
+/** Hard cap so incremental mode can't loop forever on a misconfigured site. */
+const INCREMENTAL_PAGE_CAP = 50;
+/** Default page count for `mode: 'pages'`. Matches the design spec. */
+const DEFAULT_PAGES = 3;
 
 const NAV_TIMEOUT_BACKOFFS_MS = [500, 1500];   // 2 retries
 const RATE_LIMITED_BACKOFF_MS = 30_000;        // 1 retry
@@ -130,6 +165,124 @@ export class CrawlerService {
         persisted: false,
       };
     });
+  }
+
+  /**
+   * Crawl a board by exact display name with two modes:
+   *   - 'incremental' (default): start at page 1, stop when a thread's
+   *     posted_at is <= the stored watermark (latest_thread_posted_at).
+   *     Pinned threads do NOT trigger the stop — they're not time-ordered.
+   *   - 'pages': crawl exactly `pages` pages starting at cursor.startPage.
+   *
+   * Always upserts the resulting summaries (is_pinned preserved via OR-merge)
+   * and updates board_crawl_state with the deepest page reached and the new
+   * watermark.
+   */
+  async listThreadsByName(input: ListThreadsByNameInput): Promise<ListThreadsByNameOutput> {
+    const board = await findBoardByName(input.siteKey, input.boardName);
+    if (!board) {
+      throw new McpToolError(
+        'BOARD_NOT_FOUND',
+        `board "${input.boardName}" not found in ${input.siteKey}`,
+      );
+    }
+    const prevState = await getBoardCrawlState(board.id);
+    const watermark = prevState?.latestThreadPostedAt ?? null;
+    const mode = input.mode ?? 'incremental';
+
+    const result = await this.run(
+      'forum_list_threads',
+      input.siteKey,
+      input as unknown as Record<string, unknown>,
+      async (page, adapter) => {
+        const collected: ThreadSummary[] = [];
+        let visitedMaxPage = 0;
+        let nextCursor: { startPage: number } | null = null;
+
+        if (mode === 'pages') {
+          const start = input.cursor?.startPage ?? 1;
+          const count = input.pages ?? DEFAULT_PAGES;
+          for (let p = start; p < start + count; p++) {
+            const rows = await adapter.listThreads(page, { board: board.boardKey, page: p });
+            if (rows.length === 0) break;
+            collected.push(...rows);
+            visitedMaxPage = p;
+          }
+          if (collected.length > 0) {
+            nextCursor = { startPage: visitedMaxPage + 1 };
+          }
+        } else {
+          // incremental
+          outer: for (let p = 1; p <= INCREMENTAL_PAGE_CAP; p++) {
+            const rows = await adapter.listThreads(page, { board: board.boardKey, page: p });
+            if (rows.length === 0) break;
+            for (const r of rows) {
+              const isPinned = (r.raw as { isPinned?: boolean } | undefined)?.isPinned === true;
+              if (!isPinned && watermark && r.postedAt && r.postedAt <= watermark) {
+                break outer;
+              }
+              collected.push(r);
+            }
+            visitedMaxPage = p;
+          }
+        }
+
+        return { collected, visitedMaxPage, nextCursor };
+      },
+    );
+
+    // Persist outside `run()` — only happens on success path.
+    let newWatermark: string | null = watermark;
+    for (const s of result.collected) {
+      const isPinned = (s.raw as { isPinned?: boolean } | undefined)?.isPinned === true;
+      await upsertThreadSummary(input.siteKey, s, { isPinned });
+      if (!isPinned && s.postedAt && (newWatermark === null || s.postedAt > newWatermark)) {
+        newWatermark = s.postedAt;
+      }
+    }
+    const lastCrawledAt = new Date().toISOString();
+    await upsertBoardCrawlState({
+      boardId: board.id,
+      ...(result.visitedMaxPage > 0 ? { deepestPageCrawled: result.visitedMaxPage } : {}),
+      ...(newWatermark ? { latestThreadPostedAt: newWatermark } : {}),
+      lastCrawledAt,
+    });
+
+    return {
+      threads: result.collected,
+      nextCursor: result.nextCursor,
+      state: {
+        deepestPageCrawled: Math.max(prevState?.deepestPageCrawled ?? 0, result.visitedMaxPage),
+        latestThreadPostedAt: newWatermark,
+        lastCrawledAt,
+      },
+    };
+  }
+
+  /**
+   * Fetch a single thread by its composite id "{boardKey}/{articleId}".
+   * Reuses the existing URL-based fetchThread() so retry / persistence
+   * behavior matches what init:pinned has been using.
+   */
+  async fetchThreadById(input: FetchThreadByIdInput): Promise<Thread> {
+    const m = /^([^/]+)\/(\d+)$/.exec(input.threadId);
+    if (!m) {
+      throw new McpToolError(
+        'BOARD_NOT_FOUND',
+        `invalid threadId "${input.threadId}" — expected "{boardKey}/{articleId}"`,
+      );
+    }
+    const boardKey = m[1]!;
+    const articleId = m[2]!;
+    const baseUrl = process.env.SCHOOL_BBS_BASE_URL;
+    if (!baseUrl) {
+      throw new McpToolError('FETCH_FAILED', 'SCHOOL_BBS_BASE_URL not set');
+    }
+    const url = `${baseUrl.replace(/\/+$/, '')}/article/${boardKey}/${articleId}`;
+    const fetchInput: FetchThreadInput = { siteKey: input.siteKey, url, persist: true };
+    if (input.maxReplies !== undefined) fetchInput.maxReplies = input.maxReplies;
+    const out = await this.fetchThread(fetchInput);
+    return out.thread;
   }
 
   /**

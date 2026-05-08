@@ -1,7 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { listAdapters } from '../core/registry';
 import { wrap } from './envelope';
-import { McpToolError } from './error-codes';
 import {
   ListSitesInput,
   ListThreadsInput,
@@ -53,29 +52,22 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     },
     async (raw: unknown) => wrap(async () => {
       const input = ListThreadsInput.parse(raw);
-      void deps; // crawler.listThreadsByName(input) — implemented in Branch 4
-      void input;
-      throw new McpToolError(
-        'FETCH_FAILED',
-        'forum_list_threads is not yet implemented (Branch 4).',
-      );
+      const out = await deps.crawler.listThreadsByName(input);
+      return { data: out.threads, nextCursor: out.nextCursor, state: out.state };
     }),
   );
 
   server.registerTool(
     'forum_get_thread',
     {
-      description: 'Fetch a single thread including all replies, by site-internal threadId.',
+      description:
+        'Fetch a single thread including all replies. threadId is "{boardKey}/{articleId}" as returned by forum_list_threads.',
       inputSchema: GetThreadInput.shape,
     },
     async (raw: unknown) => wrap(async () => {
       const input = GetThreadInput.parse(raw);
-      void deps; // crawler.fetchThreadById(input) — implemented in Branch 4
-      void input;
-      throw new McpToolError(
-        'FETCH_FAILED',
-        'forum_get_thread is not yet implemented (Branch 4).',
-      );
+      const thread = await deps.crawler.fetchThreadById(input);
+      return { data: thread };
     }),
   );
 
