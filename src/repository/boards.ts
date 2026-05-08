@@ -19,6 +19,35 @@ export interface BoardRow {
   name: string | null;
 }
 
+/**
+ * Boards that have zero pinned threads. Used by the init orchestrator to
+ * resume init for boards that were skipped or failed previously.
+ */
+export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> {
+  try {
+    const r = await getPool().query<{ id: string; board_key: string; name: string | null }>(
+      `SELECT b.id, b.board_key, b.name
+         FROM boards b
+         LEFT JOIN threads t
+                ON t.site_key = b.site_key
+               AND t.board_key = b.board_key
+               AND t.is_pinned = true
+        WHERE b.site_key = $1
+        GROUP BY b.id, b.board_key, b.name
+       HAVING count(t.id) = 0
+        ORDER BY b.id`,
+      [siteKey],
+    );
+    return r.rows.map((row) => ({
+      id: Number(row.id),
+      boardKey: row.board_key,
+      name: row.name,
+    }));
+  } catch (e) {
+    throw new DatabaseError(`boardsMissingPinned failed for ${siteKey}`, e);
+  }
+}
+
 export async function listBoards(siteKey: string): Promise<BoardRow[]> {
   try {
     const r = await getPool().query<{ id: string; board_key: string; name: string | null }>(

@@ -16,6 +16,44 @@ export interface SectionRow {
   name: string | null;
 }
 
+export async function hasSections(siteKey: string): Promise<boolean> {
+  try {
+    const r = await getPool().query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM sections WHERE site_key = $1`,
+      [siteKey],
+    );
+    return (r.rows[0]?.c ?? 0) > 0;
+  } catch (e) {
+    throw new DatabaseError(`hasSections failed for ${siteKey}`, e);
+  }
+}
+
+/**
+ * Sections (any depth) that have zero boards under them. Used by the init
+ * orchestrator to decide which sections need a re-crawl of their children.
+ */
+export async function sectionsMissingBoards(siteKey: string): Promise<SectionRow[]> {
+  try {
+    const r = await getPool().query<{ id: string; section_key: string; name: string | null }>(
+      `SELECT s.id, s.section_key, s.name
+         FROM sections s
+         LEFT JOIN boards b ON b.section_id = s.id
+        WHERE s.site_key = $1
+        GROUP BY s.id, s.section_key, s.name
+       HAVING count(b.id) = 0
+        ORDER BY s.id`,
+      [siteKey],
+    );
+    return r.rows.map((row) => ({
+      id: Number(row.id),
+      sectionKey: row.section_key,
+      name: row.name,
+    }));
+  } catch (e) {
+    throw new DatabaseError(`sectionsMissingBoards failed for ${siteKey}`, e);
+  }
+}
+
 export async function listTopLevelSections(siteKey: string): Promise<SectionRow[]> {
   try {
     const r = await getPool().query<{ id: string; section_key: string; name: string | null }>(

@@ -13,6 +13,10 @@ import { upsertThread } from './repository/threads';
 import { upsertPosts } from './repository/posts';
 import { upsertSite } from './repository/sites';
 import { appendFetchLog } from './repository/fetch-log';
+import { hasSections, sectionsMissingBoards } from './repository/sections';
+import { boardsMissingPinned } from './repository/boards';
+import { InitOrchestrator } from './core/init-orchestrator';
+import { runInitSections, runInitBoards, runInitPinned } from './core/init-runners';
 import { registerTools } from './server/tools';
 import { addRedactedSecret, logger } from './util/logger';
 
@@ -51,6 +55,31 @@ async function main(): Promise<void> {
     });
   }
 
+  // Helper: acquire a logged-in page, run `fn`, release everything.
+  // Used by InitOrchestrator so init flows go through the same browser pool
+  // / storageState as regular tool calls.
+  const runWithPage = async <T>(siteKey: string, fn: (page: import('playwright').Page) => Promise<T>): Promise<T> => {
+    const ctx = await browserPool.acquire(siteKey);
+    const page = await ctx.context.newPage();
+    try {
+      await auth.ensureLoggedIn(page, getAdapter(siteKey));
+      return await fn(page);
+    } finally {
+      await page.close().catch(() => {});
+      ctx.release();
+    }
+  };
+
+  const initOrchestrator = new InitOrchestrator({
+    hasSections,
+    sectionsMissingBoards,
+    boardsMissingPinned,
+    runWithPage,
+    runInitSections,
+    runInitBoards,
+    runInitPinned,
+  });
+
   const crawler = new CrawlerService({
     rateLimiter,
     browserPool: {
@@ -65,6 +94,7 @@ async function main(): Promise<void> {
       return threadId;
     },
     appendFetchLog,
+    initOrchestrator,
   });
 
   const server = new McpServer({ name: 'bbs-crawler', version: '0.1.0' });
