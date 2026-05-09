@@ -27,6 +27,7 @@
     "db:migrate:down": "tsx scripts/db/migrate.ts down",
     "db:migrate:status": "tsx scripts/db/migrate.ts status",
     "db:delete-pinned": "tsx scripts/db/delete-pinned.ts",
+    "db:peek": "tsx scripts/db/peek-posts.ts",
 
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
