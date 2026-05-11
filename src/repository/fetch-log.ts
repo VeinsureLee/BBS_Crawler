@@ -1,4 +1,4 @@
-import { getContentDb } from './db';
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 export type FetchLogStatus = 'ok' | 'error' | 'rate_limited';
@@ -14,7 +14,7 @@ export interface FetchLogRow {
 
 export async function appendFetchLog(row: FetchLogRow): Promise<void> {
   try {
-    await getContentDb().query(
+    await getStructureDb().query(
       `INSERT INTO fetch_log (site_key, tool, args, status, error_code, duration_ms, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))`,
       [

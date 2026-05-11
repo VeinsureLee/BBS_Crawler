@@ -20,6 +20,7 @@ import { initDbs, closeDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { listTopLevelSections, upsertSection } from '../../src/repository/sections';
 import { upsertBoard } from '../../src/repository/boards';
+import { logger } from '../../src/util/logger';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -33,8 +34,15 @@ async function crawlSectionRecursive(
   parentSectionKey: string,
   requestIntervalMs: number,
   depth: number = 0,
+  visited: Set<string> = new Set(),
 ): Promise<{ boards: number; subSections: number }> {
   const indent = '  '.repeat(depth);
+  if (visited.has(parentSectionKey)) {
+    logger.warn({ parentSectionKey, depth }, `${indent}已访问过 ${parentSectionKey}，跳过避免环`);
+    return { boards: 0, subSections: 0 };
+  }
+  visited.add(parentSectionKey);
+
   const children = await adapter.listSectionChildren!(page, parentSectionKey);
   let boardCount = 0;
   let subCount = 0;
@@ -52,6 +60,15 @@ async function crawlSectionRecursive(
   }
 
   for (const sub of children.subSections) {
+    // school-bbs's section pages tend to list the current section among its
+    // own subSections (sidebar nav). Skip that self-reference.
+    if (sub.sectionKey === parentSectionKey) {
+      logger.warn(
+        { parentSectionKey, depth },
+        `${indent}listSectionChildren 把 ${parentSectionKey} 列为自己的子节点，跳过`,
+      );
+      continue;
+    }
     const { sectionId } = await upsertSection({
       siteKey,
       sectionKey: sub.sectionKey,
@@ -59,11 +76,14 @@ async function crawlSectionRecursive(
       parentSectionId,
     });
     subCount++;
-    console.log(`${indent}[sub] ${sub.sectionKey}  ${sub.name}  -> id=${sectionId}`);
+    logger.info(
+      { depth, sectionId, sectionKey: sub.sectionKey, name: sub.name },
+      `${indent}子讨论区 ${sub.sectionKey}  ${sub.name}`,
+    );
 
     await sleep(requestIntervalMs);
     const childResult = await crawlSectionRecursive(
-      page, adapter, siteKey, sectionId, sub.sectionKey, requestIntervalMs, depth + 1
+      page, adapter, siteKey, sectionId, sub.sectionKey, requestIntervalMs, depth + 1, visited,
     );
     boardCount += childResult.boards;
     subCount += childResult.subSections;
@@ -99,19 +119,24 @@ async function main() {
 
   const browser = await chromium.launch({
     headless: cfg.browserHeadless,
-    executablePath: cfg.browserExecutablePath,
+    ...(cfg.browserExecutablePath ? { executablePath: cfg.browserExecutablePath } : {}),
   });
   const ctx = await browser.newContext({
     storageState: statePath,
-    userAgent: cfg.browserUserAgent,
+    ...(cfg.browserUserAgent ? { userAgent: cfg.browserUserAgent } : {}),
   });
   const page = await ctx.newPage();
 
   let totalBoards = 0;
   let totalSubs = 0;
+  const startedAt = Date.now();
+  logger.info({ siteKey, sections: sections.length, script: 'init-boards' }, 'init-boards: 开始');
   try {
     for (const sec of sections) {
-      console.log(`Section [${sec.id}] ${sec.sectionKey}  ${sec.name ?? ''}`);
+      logger.info(
+        { sectionId: sec.id, sectionKey: sec.sectionKey, name: sec.name ?? '' },
+        `处理顶级讨论区 ${sec.sectionKey}`,
+      );
       const { boards, subSections } = await crawlSectionRecursive(
         page,
         adapter,
@@ -121,13 +146,23 @@ async function main() {
         requestIntervalMs,
         1,
       );
-      console.log(`  -> ${boards} boards, ${subSections} sub-sections in this branch`);
+      logger.info(
+        { sectionKey: sec.sectionKey, boards, subSections },
+        `分支汇总：${boards} 个版面、${subSections} 个子讨论区`,
+      );
       totalBoards += boards;
       totalSubs += subSections;
       await sleep(requestIntervalMs);
     }
-    console.log(
-      `Done. ${sections.length} top-level sections, ${totalSubs} total sub-sections, ${totalBoards} boards persisted.`,
+    logger.info(
+      {
+        siteKey,
+        sections: sections.length,
+        totalSubSections: totalSubs,
+        totalBoards,
+        elapsedMs: Date.now() - startedAt,
+      },
+      `init-boards: 完成（${sections.length} 顶级讨论区、${totalSubs} 子讨论区、${totalBoards} 版面入库）`,
     );
   } finally {
     await ctx.close();

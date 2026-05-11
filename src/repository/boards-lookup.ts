@@ -1,4 +1,8 @@
-import { getDb } from './db';
+/**
+ * Lookups for board nodes (`nodes WHERE type='board'`) in structure.db.
+ * Used by crawler-service to translate user-facing names → board node ids.
+ */
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 export interface BoardRow {
@@ -13,22 +17,22 @@ export interface BoardRow {
  * not found — callers translate that into BOARD_NOT_FOUND for the agent.
  *
  * Names come from the agent (e.g. "北邮人在上海") and must match the value
- * stored in `boards.name` exactly. Case-sensitive.
+ * stored in `nodes.name` exactly. Case-sensitive.
  */
 export async function findBoardByName(
   siteKey: string,
   name: string,
 ): Promise<BoardRow | null> {
   try {
-    const r = await getDb().query<{
+    const r = await getStructureDb().query<{
       id: number;
       site_key: string;
-      board_key: string;
+      node_key: string;
       name: string;
     }>(
-      `SELECT id, site_key, board_key, name
-         FROM boards
-        WHERE site_key = $1 AND name = $2
+      `SELECT id, site_key, node_key, name
+         FROM nodes
+        WHERE site_key = $1 AND name = $2 AND type = 'board'
         LIMIT 1`,
       [siteKey, name],
     );
@@ -37,7 +41,7 @@ export async function findBoardByName(
     return {
       id: Number(row.id),
       siteKey: row.site_key,
-      boardKey: row.board_key,
+      boardKey: row.node_key,
       name: row.name,
     };
   } catch (e) {
@@ -46,18 +50,20 @@ export async function findBoardByName(
 }
 
 /**
- * Fast presence check by board id. Used by the init orchestrator to verify a
+ * Fast presence check by node id. Used by the init orchestrator to verify a
  * board exists before scheduling a crawl.
  */
 export async function getBoardById(boardId: number): Promise<BoardRow | null> {
   try {
-    const r = await getDb().query<{
+    const r = await getStructureDb().query<{
       id: number;
       site_key: string;
-      board_key: string;
+      node_key: string;
       name: string;
     }>(
-      `SELECT id, site_key, board_key, name FROM boards WHERE id = $1 LIMIT 1`,
+      `SELECT id, site_key, node_key, name FROM nodes
+        WHERE id = $1 AND type = 'board'
+        LIMIT 1`,
       [boardId],
     );
     const row = r.rows[0];
@@ -65,7 +71,7 @@ export async function getBoardById(boardId: number): Promise<BoardRow | null> {
     return {
       id: Number(row.id),
       siteKey: row.site_key,
-      boardKey: row.board_key,
+      boardKey: row.node_key,
       name: row.name,
     };
   } catch (e) {

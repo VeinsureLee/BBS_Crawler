@@ -1,13 +1,24 @@
 /**
- * Database access layer.
+ * Database access layer — layered storage.
  *
- * Two separate SQLite databases:
- *  - structure.db: sites, sections, boards, board_crawl_state
- *  - content.db: threads, posts, fetch_log
+ *   structure.db        one global file with:
+ *                       - sites
+ *                       - nodes (recursive tree: forum / sub_forum / board)
+ *                       - fetch_log (API call audit)
+ *
+ *   forums/<key>.db     one file per top-level forum, with:
+ *                       - threads (incl. is_pinned flag)
+ *                       - posts (linked to threads via thread_id)
+ *                       - board_crawl_state (per-board incremental progress)
+ *                       - daily_traffic (per-board daily snapshots)
+ *
+ * Forum dbs are opened lazily on first reference via `getForumDb(dbFile)`.
+ * The path stored in structure.db's `nodes.db_file` is the source of truth
+ * for "which forum lives in which file".
  */
 import Database from 'better-sqlite3';
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import { DatabaseError } from '../core/errors';
 
 export interface QueryResult<T = Record<string, unknown>> {
@@ -16,51 +27,159 @@ export interface QueryResult<T = Record<string, unknown>> {
 }
 
 export interface TxClient {
-  query<T = Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<QueryResult<T>>;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
 }
 
 export interface Db {
-  query<T = Record<string, unknown>>(
-    sql: string,
-    params?: unknown[],
-  ): Promise<QueryResult<T>>;
-  /** Run multi-statement DDL/DML. No params; for migrations and similar. */
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<QueryResult<T>>;
   exec(sql: string): Promise<void>;
   transaction<R>(fn: (tx: TxClient) => Promise<R>): Promise<R>;
   close(): Promise<void>;
 }
 
-class SQLiteDb implements Db {
-  private db: Database.Database;
+export interface DbConfig {
+  dataDir: string;
+}
 
-  constructor(dataDir: string, dbName: string) {
-    // Ensure directory exists
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+// ---------------------------------------------------------------------------
+// Schema constants (idempotent — uses CREATE TABLE IF NOT EXISTS)
+// ---------------------------------------------------------------------------
+
+export const STRUCTURE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS migrations (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sites (
+  site_key     TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  base_url     TEXT NOT NULL,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS nodes (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  parent_id       INTEGER REFERENCES nodes(id) ON DELETE CASCADE,
+  site_key        TEXT NOT NULL REFERENCES sites(site_key) ON DELETE CASCADE,
+  node_key        TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  type            TEXT NOT NULL CHECK (type IN ('forum','sub_forum','board')),
+  level           INTEGER NOT NULL,
+  db_file         TEXT,
+  moderators      TEXT,
+  stats           TEXT,
+  raw             TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  last_crawled_at TEXT,
+  UNIQUE (site_key, node_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_nodes_parent     ON nodes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_nodes_site_type  ON nodes(site_key, type);
+
+CREATE TABLE IF NOT EXISTS fetch_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_key    TEXT NOT NULL,
+  tool        TEXT NOT NULL,
+  args        TEXT NOT NULL,
+  status      TEXT NOT NULL,
+  error_code  TEXT,
+  duration_ms INTEGER,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_fetch_log_created ON fetch_log(created_at);
+`;
+
+export const FORUM_SCHEMA = `
+CREATE TABLE IF NOT EXISTS migrations (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS threads (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  board_node_id   INTEGER NOT NULL,
+  url             TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  author          TEXT,
+  posted_at       TEXT,
+  last_reply_at   TEXT,
+  reply_count     INTEGER,
+  view_count      INTEGER,
+  raw             TEXT,
+  is_pinned       INTEGER NOT NULL DEFAULT 0,
+  first_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  last_fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_threads_board        ON threads(board_node_id, posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_board_pinned ON threads(board_node_id, is_pinned, posted_at DESC);
+
+CREATE TABLE IF NOT EXISTS posts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id     INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+  floor         INTEGER NOT NULL,
+  author        TEXT NOT NULL,
+  posted_at     TEXT,
+  content_html  TEXT NOT NULL,
+  content_text  TEXT NOT NULL,
+  attachments   TEXT,
+  raw           TEXT,
+  UNIQUE (thread_id, floor)
+);
+
+CREATE TABLE IF NOT EXISTS board_crawl_state (
+  board_node_id           INTEGER PRIMARY KEY,
+  deepest_page_crawled    INTEGER NOT NULL DEFAULT 0,
+  latest_thread_posted_at TEXT,
+  last_crawled_at         TEXT,
+  last_thread_key         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS daily_traffic (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  board_node_id INTEGER NOT NULL,
+  date          TEXT NOT NULL,
+  online        INTEGER,
+  today_posts   INTEGER,
+  threads       INTEGER,
+  posts         INTEGER,
+  UNIQUE (board_node_id, date)
+);
+`;
+
+// ---------------------------------------------------------------------------
+// SQLiteDb — Promise-shaped wrapper over the synchronous better-sqlite3 driver.
+// ---------------------------------------------------------------------------
+
+export class SQLiteDb implements Db {
+  private readonly _db: Database.Database;
+
+  constructor(dbPath: string) {
+    if (dbPath !== ':memory:') {
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     }
+    this._db = new Database(dbPath);
+    this._db.pragma('journal_mode = WAL');
+    this._db.pragma('foreign_keys = ON');
+  }
 
-    const dbPath = path.join(dataDir, dbName);
-    this.db = new Database(dbPath);
-    // Enable WAL mode for better concurrency
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
+  /** Idempotent schema application. Called once when the file is first opened. */
+  applySchema(schemaSql: string): void {
+    this._db.exec(schemaSql);
   }
 
   private convertParams(sql: string, params?: unknown[]): { sql: string; params: Record<string, unknown> } {
-    if (!params || params.length === 0) {
-      return { sql, params: {} };
-    }
-
-    // Convert $1, $2, ... to :1, :2, ... for better-sqlite3
+    if (!params || params.length === 0) return { sql, params: {} };
     let convertedSql = sql;
     const convertedParams: Record<string, unknown> = {};
     for (let i = 0; i < params.length; i++) {
-      const placeholder = `$${i + 1}`;
-      const namedPlaceholder = `:${i + 1}`;
-      convertedSql = convertedSql.replaceAll(placeholder, namedPlaceholder);
+      convertedSql = convertedSql.replaceAll(`$${i + 1}`, `:${i + 1}`);
       convertedParams[`${i + 1}`] = params[i];
     }
     return { sql: convertedSql, params: convertedParams };
@@ -72,21 +191,15 @@ class SQLiteDb implements Db {
   ): Promise<QueryResult<T>> {
     try {
       const { sql: convertedSql, params: convertedParams } = this.convertParams(sql, params);
-      const stmt = this.db.prepare(convertedSql);
-
-      // Check if it's a SELECT statement
-      const isSelect = convertedSql.trim().toUpperCase().startsWith('SELECT');
-
-      if (isSelect) {
+      const stmt = this._db.prepare(convertedSql);
+      const trimmed = convertedSql.trim().toUpperCase();
+      const isReader = trimmed.startsWith('SELECT') || trimmed.startsWith('WITH');
+      if (isReader) {
         const rows = stmt.all(convertedParams) as T[];
         return { rows };
-      } else {
-        const result = stmt.run(convertedParams);
-        return {
-          rows: [],
-          affectedRows: result.changes,
-        };
       }
+      const result = stmt.run(convertedParams);
+      return { rows: [], affectedRows: result.changes };
     } catch (e) {
       throw new DatabaseError(`Query failed: ${sql}`, e);
     }
@@ -94,21 +207,17 @@ class SQLiteDb implements Db {
 
   async exec(sql: string): Promise<void> {
     try {
-      this.db.exec(sql);
+      this._db.exec(sql);
     } catch (e) {
-      throw new DatabaseError(`Exec failed`, e);
+      throw new DatabaseError('Exec failed', e);
     }
   }
 
   async transaction<R>(fn: (tx: TxClient) => Promise<R>): Promise<R> {
-    // For SQLite with async interface, we'll use explicit BEGIN/COMMIT/ROLLBACK
     const txClient: TxClient = {
-      query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]) => {
-        return this.query<T>(sql, params);
-      }
+      query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]) =>
+        this.query<T>(sql, params),
     };
-
-    // Start transaction
     await this.exec('BEGIN DEFERRED TRANSACTION');
     try {
       const result = await fn(txClient);
@@ -121,86 +230,92 @@ class SQLiteDb implements Db {
   }
 
   async close(): Promise<void> {
-    this.db.close();
+    this._db.close();
   }
 }
 
-export interface DbConfig {
-  dataDir: string;
-}
+// ---------------------------------------------------------------------------
+// Singletons + forum-db pool
+// ---------------------------------------------------------------------------
 
-export interface Dbs {
-  structureDb: Db;
-  contentDb: Db;
-}
+let structureDb_: SQLiteDb | null = null;
+let dataDir_: string | null = null;
 
-let structureDbInstance: Db | null = null;
-let contentDbInstance: Db | null = null;
+/** dbFile string → open SQLiteDb. dbFile is whatever `nodes.db_file` stored. */
+const forumDbCache = new Map<string, SQLiteDb>();
 
 /**
- * Initialize both structure and content databases.
+ * Initialize the structure database. Idempotent — calling twice with the same
+ * dataDir returns the existing instance.
  */
-export function initDbs(config: DbConfig): Dbs {
-  if (!structureDbInstance) {
-    structureDbInstance = new SQLiteDb(config.dataDir, 'structure.db');
-  }
-  if (!contentDbInstance) {
-    contentDbInstance = new SQLiteDb(config.dataDir, 'content.db');
-  }
-  return {
-    structureDb: structureDbInstance,
-    contentDb: contentDbInstance,
-  };
+export function initDb(config: DbConfig): SQLiteDb {
+  if (structureDb_) return structureDb_;
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  const dbPath = path.join(config.dataDir, 'structure.db');
+  structureDb_ = new SQLiteDb(dbPath);
+  structureDb_.applySchema(STRUCTURE_SCHEMA);
+  dataDir_ = config.dataDir;
+  return structureDb_;
 }
 
-/**
- * Get structure database (must call initDbs first).
- */
-export function getStructureDb(): Db {
-  if (!structureDbInstance) {
-    throw new DatabaseError('initDbs has not been called');
-  }
-  return structureDbInstance;
+export function getStructureDb(): SQLiteDb {
+  if (!structureDb_) throw new DatabaseError('initDb has not been called');
+  return structureDb_;
 }
 
 /**
- * Get content database (must call initDbs first).
+ * Open (or fetch from cache) a forum db at the given relative path. The path
+ * comes from structure.db's nodes.db_file column. Schema is applied on first
+ * open (idempotent), so this also works for brand-new forum files.
+ *
+ * Accepts an absolute path too, primarily for tests using ':memory:' or tmp dirs.
  */
-export function getContentDb(): Db {
-  if (!contentDbInstance) {
-    throw new DatabaseError('initDbs has not been called');
-  }
-  return contentDbInstance;
+export function getForumDb(dbFile: string): SQLiteDb {
+  const cached = forumDbCache.get(dbFile);
+  if (cached) return cached;
+
+  const abs = path.isAbsolute(dbFile) || dbFile === ':memory:'
+    ? dbFile
+    : (dataDir_ ?? (() => { throw new DatabaseError('initDb has not been called'); })()) + path.sep + dbFile;
+  const normalized = abs === ':memory:' ? abs : path.normalize(abs);
+
+  const db = new SQLiteDb(normalized);
+  db.applySchema(FORUM_SCHEMA);
+  forumDbCache.set(dbFile, db);
+  return db;
 }
 
-/**
- * Close both databases.
- */
+/** Closes all open dbs and resets singletons. Idempotent. */
+export async function closeAllDbs(): Promise<void> {
+  for (const [, db] of forumDbCache) {
+    try { await db.close(); } catch { /* best effort */ }
+  }
+  forumDbCache.clear();
+  if (structureDb_) {
+    try { await structureDb_.close(); } catch { /* best effort */ }
+    structureDb_ = null;
+  }
+  dataDir_ = null;
+}
+
+/** Test-only — resets state without closing. Production code should not call this. */
+export function _resetForTests(): void {
+  structureDb_ = null;
+  dataDir_ = null;
+  forumDbCache.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Deprecated aliases — kept so the upcoming migration commit doesn't break in
+// the middle. Will be removed once all callers are off the old API.
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use initDb instead. */
+export function initDbs(config: DbConfig): { structureDb: Db } {
+  return { structureDb: initDb(config) };
+}
+
+/** @deprecated Use closeAllDbs instead. */
 export async function closeDbs(): Promise<void> {
-  if (structureDbInstance) {
-    await structureDbInstance.close();
-    structureDbInstance = null;
-  }
-  if (contentDbInstance) {
-    await contentDbInstance.close();
-    contentDbInstance = null;
-  }
-}
-
-// --- Deprecated API for backward compatibility ---
-
-/** @deprecated Use initDbs instead */
-export function initDb(dataDir: string): Db {
-  initDbs({ dataDir });
-  return getStructureDb();
-}
-
-/** @deprecated Use getStructureDb or getContentDb instead */
-export function getDb(): Db {
-  return getStructureDb();
-}
-
-/** @deprecated Use closeDbs instead */
-export async function closeDb(): Promise<void> {
-  await closeDbs();
+  await closeAllDbs();
 }

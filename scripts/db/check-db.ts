@@ -1,78 +1,81 @@
 /**
- * Quick health-check for the SQLite databases.
+ * Quick health check for the layered SQLite layout.
+ *
+ *   structure.db        sites / nodes / fetch_log
+ *   forums/<key>.db     one per top-level forum: threads / posts / board_crawl_state / daily_traffic
  *
  * Usage:
- *   npx tsx scripts/db/check-db.ts
- *
- * Reports which migrations have been applied and the row count of every
- * known table. Creates the data dir on first run if missing.
+ *   npm run db:check                  # default site = school-bbs
+ *   npm run db:check -- <siteKey>
  */
 import 'dotenv/config';
-import * as fs from 'fs';
-import { initDbs, closeDbs, getStructureDb, getContentDb } from '../../src/repository/db';
+import fs from 'fs';
+import path from 'path';
+import { parseConfig } from '../../src/core/config';
+import { initDb, getStructureDb, getForumDb, closeAllDbs } from '../../src/repository/db';
 import type { Db } from '../../src/repository/db';
 
-const STRUCTURE_TABLES = [
-  'sites',
-  'sections',
-  'boards',
-  'board_crawl_state',
-  'migrations',
-] as const;
+const STRUCTURE_TABLES = ['sites', 'nodes', 'fetch_log', 'migrations'] as const;
+const FORUM_TABLES = ['threads', 'posts', 'board_crawl_state', 'daily_traffic', 'migrations'] as const;
 
-const CONTENT_TABLES = [
-  'threads',
-  'posts',
-  'fetch_log',
-  'migrations',
-] as const;
-
-async function checkDb(label: string, db: Db, tables: readonly string[]): Promise<void> {
+async function dumpTables(label: string, db: Db, tables: readonly string[]): Promise<void> {
   console.log(`\n=== ${label} ===`);
-
-  // Get existing tables from SQLite master
   const existing = await db.query<{ name: string }>(
-    `SELECT name FROM sqlite_master
-     WHERE type = 'table'
-     ORDER BY name`,
+    `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`,
   );
   const present = new Set(existing.rows.map((r) => r.name));
-
-  console.log('\nTables:');
   for (const name of tables) {
     if (!present.has(name)) {
       console.log(`  ${name.padEnd(20)} (missing)`);
       continue;
     }
-    const r = await db.query<{ c: number }>(`SELECT count(*) as c FROM ${name}`);
+    const r = await db.query<{ c: number }>(`SELECT count(*) AS c FROM ${name}`);
     console.log(`  ${name.padEnd(20)} ${r.rows[0]!.c} rows`);
-  }
-
-  if (present.has('migrations')) {
-    const r = await db.query<{ name: string; applied_at: string }>(
-      `SELECT name, applied_at FROM migrations ORDER BY id`,
-    );
-    console.log('\nMigrations applied:');
-    for (const row of r.rows) console.log(`  ${row.name}`);
   }
 }
 
 async function main(): Promise<void> {
-  const dataDir = process.env.DATABASE_PATH ?? './data';
-  console.log(`SQLite data dir: ${dataDir}`);
+  const siteKey = process.argv[2] ?? 'school-bbs';
+  const cfg = parseConfig(process.env);
+  console.log(`SQLite data dir: ${cfg.dataDir}`);
+  console.log(`Site:            ${siteKey}`);
 
-  // Ensure data dir exists
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(cfg.dataDir)) {
+    fs.mkdirSync(cfg.dataDir, { recursive: true });
   }
 
-  initDbs({ dataDir });
+  initDb({ dataDir: cfg.dataDir });
 
   try {
-    await checkDb('structure.db', getStructureDb(), STRUCTURE_TABLES);
-    await checkDb('content.db', getContentDb(), CONTENT_TABLES);
+    await dumpTables('structure.db', getStructureDb(), STRUCTURE_TABLES);
+
+    const forums = await getStructureDb().query<{ node_key: string; name: string; db_file: string | null }>(
+      `SELECT node_key, name, db_file FROM nodes
+        WHERE site_key = $1 AND type = 'forum'
+        ORDER BY id`,
+      [siteKey],
+    );
+
+    if (forums.rows.length === 0) {
+      console.log('\n(no top-level forums registered yet — run init:sections first)');
+      return;
+    }
+
+    for (const f of forums.rows) {
+      if (!f.db_file) {
+        console.log(`\n=== forum "${f.name}" (${f.node_key}) ===\n  (db_file column is null — broken)`);
+        continue;
+      }
+      const abs = path.join(cfg.dataDir, f.db_file);
+      const exists = fs.existsSync(abs);
+      console.log(`\n=== forum "${f.name}" (${f.node_key}) ===`);
+      console.log(`  file: ${f.db_file}${exists ? '' : '  (file not yet created)'}`);
+      if (!exists) continue;
+      const forumDb = getForumDb(f.db_file);
+      await dumpTables(`  tables in ${f.db_file}`, forumDb, FORUM_TABLES);
+    }
   } finally {
-    await closeDbs();
+    await closeAllDbs();
   }
 }
 

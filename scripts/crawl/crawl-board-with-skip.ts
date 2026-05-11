@@ -72,46 +72,48 @@ async function main() {
     auth,
     registry: { getAdapter },
     persistThread: async (siteKey, thread) => {
-      const { threadId } = await upsertThread(siteKey, thread);
-      await upsertPosts(threadId, thread.posts);
+      const { threadId, forumDb } = await upsertThread(siteKey, thread);
+      await upsertPosts(forumDb, threadId, thread.posts);
       return threadId;
     },
     appendFetchLog,
   });
 
+  const startedAt = Date.now();
+  logger.info({ boardKey, freshnessHours, script: 'crawl-board-with-skip' }, `crawl-board: 列出版面 ${boardKey}`);
   try {
-    console.log(`Listing threads from board: ${boardKey}`);
     const listResult = await crawler.listThreads({
       siteKey: 'school-bbs',
       board: boardKey,
       page: 1,
     });
 
-    console.log(`Found ${listResult.results.length} thread(s) on first page`);
+    logger.info({ boardKey, found: listResult.results.length }, `首页发现 ${listResult.results.length} 帖`);
 
     // Get already crawled URLs for quick filtering
     const crawledUrls = await getCrawledThreadUrls('school-bbs', boardKey);
-    console.log(`Already crawled ${crawledUrls.size} thread(s) in this board`);
+    logger.info({ boardKey, alreadyCrawled: crawledUrls.size }, `本版已爬 ${crawledUrls.size} 帖`);
 
     const toFetch = [];
     for (const summary of listResult.results) {
       const skipResult = await shouldSkipFetch(
         'school-bbs',
+        boardKey,
         summary.url,
         summary.replyCount,
         freshnessHours,
       );
       if (skipResult.skipped) {
-        console.log(`[SKIP] ${summary.title} (already fresh)`);
+        logger.info({ url: summary.url, title: summary.title }, `[SKIP] ${summary.title} (新鲜)`);
       } else {
-        console.log(`[FETCH] ${summary.title}`);
+        logger.info({ url: summary.url, title: summary.title }, `[FETCH] ${summary.title}`);
         toFetch.push(summary);
       }
     }
 
-    console.log(`\nFetching ${toFetch.length} thread(s)...`);
+    logger.info({ toFetch: toFetch.length }, `准备抓取 ${toFetch.length} 帖`);
     let successCount = 0;
-    let skipCount = listResult.results.length - toFetch.length;
+    const skipCount = listResult.results.length - toFetch.length;
 
     for (const summary of toFetch) {
       try {
@@ -120,16 +122,17 @@ async function main() {
           url: summary.url,
           persist: true,
         });
-        console.log(`[OK] ${result.thread.title} (id=${result.threadId})`);
+        logger.info({ threadId: result.threadId, title: result.thread.title }, `[OK] ${result.thread.title} (id=${result.threadId})`);
         successCount++;
       } catch (e) {
-        console.error(`[ERROR] ${summary.url}:`, e);
+        logger.error({ url: summary.url, err: String(e) }, `[ERROR] ${summary.url}: ${String(e)}`);
       }
     }
 
-    console.log(`\nDone:`);
-    console.log(`  Skipped: ${skipCount}`);
-    console.log(`  Fetched: ${successCount}`);
+    logger.info(
+      { boardKey, skipped: skipCount, fetched: successCount, elapsedMs: Date.now() - startedAt },
+      `完成：跳过 ${skipCount}，抓取 ${successCount}`,
+    );
 
   } finally {
     await closeDbs();

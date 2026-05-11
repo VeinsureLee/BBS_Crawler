@@ -34,39 +34,50 @@
 
 文件：[src/repository/sections.ts](../../src/repository/sections.ts)。
 
-### 版面（boards）
+### 版面（boards / nodes 表 type='board'）
 
 | 函数 | 签名 | 用途 |
 |---|---|---|
-| `listBoards` | `(siteKey) => Promise<BoardRow[]>` | 列所有版面 |
-| `boardsMissingPinned` | `(siteKey) => Promise<BoardRow[]>` | 找出"还没有置顶帖"的版面（用于续跑） |
-| `upsertBoard` | `(input: UpsertBoardInput) => Promise<{ boardId }>` | 写入/更新一个版面 |
+| `listBoards` | `(siteKey) => Promise<BoardRow[]>` | 列所有版面节点 |
+| `boardsMissingPinned` | `(siteKey) => Promise<BoardRow[]>` | 找出"还没有置顶帖"的版面（跨 forum db 扫描 is_pinned=1） |
+| `upsertBoard` | `(input: UpsertBoardInput) => Promise<{ boardId }>` | 写/更新 board 节点；moderators/stats 直接落 nodes 行 |
 | `findBoardByName` | `(siteKey, name) => Promise<BoardRow \| null>` | 按中文名找版面（精确匹配） |
-| `getBoardById` | `(boardId) => Promise<BoardRow \| null>` | 按 id 拿版面 |
+| `getBoardById` | `(boardId) => Promise<BoardRow \| null>` | 按 nodes.id 拿版面 |
+| `resolveBoardRoute` | `(siteKey, boardKey) => Promise<{ boardNodeId, forumDbFile }>` | 路由：boardKey → 节点 id + 所在 forum 文件 |
+| `findForumDbFileForBoard` | `(boardNodeId) => Promise<string \| null>` | 通过 nodes.id 递归上行找 forum.db_file |
 
 文件：[src/repository/boards.ts](../../src/repository/boards.ts) + [src/repository/boards-lookup.ts](../../src/repository/boards-lookup.ts)。
 
-### 帖子（threads）
+### 帖子（threads，存在 forum db 中）
 
 | 函数 | 签名 | 用途 |
 |---|---|---|
-| `checkThreadExists` | `(siteKey, url) => Promise<ThreadExistsResult>` | URL 在不在库里 + 上次抓的元信息 |
-| `getCrawledThreadUrls` | `(siteKey, boardKey?) => Promise<Set<string>>` | 一次性拿到所有已爬 URL（去重用） |
-| `shouldSkipFetch` | `(siteKey, url, summaryReplyCount?, freshnessHours?) => Promise<FetchSkippedResult>` | 判定是否跳过这次抓取（回复数没变 OR 24h 内已爬过） |
-| `upsertThread` | `(siteKey, t: Thread, options?) => Promise<{ threadId }>` | 写入/更新一个完整帖子（含 isPinned 标志） |
-| `upsertThreadSummary` | `(siteKey, s: ThreadSummary, options?) => Promise<{ threadId }>` | 仅版面列表层写入（不带 posts） |
+| `checkThreadExists` | `(siteKey, boardKey, url) => Promise<ThreadExistsResult>` | URL 在不在库里 + 上次抓的元信息 |
+| `getCrawledThreadUrls` | `(siteKey, boardKey) => Promise<Set<string>>` | 单版面的已爬 URL（去重用） |
+| `shouldSkipFetch` | `(siteKey, boardKey, url, summaryReplyCount?, freshnessHours?) => Promise<FetchSkippedResult>` | 判定是否跳过这次抓取 |
+| `upsertThread` | `(siteKey, t: Thread, options?) => Promise<{ threadId, forumDb }>` | 写完整帖子。返回值含 forumDb，**调用方应紧接着喂给 upsertPosts** |
+| `upsertThreadSummary` | `(siteKey, s: ThreadSummary, options?) => Promise<{ threadId, forumDb }>` | 仅列表层写入（不带 posts） |
 
 文件：[src/repository/threads.ts](../../src/repository/threads.ts)。
 
+**关键变化**：所有需要找到帖子位置的函数（check / skip / urls）**新增 `boardKey` 必填参数**——分层之后必须知道帖子在哪个 forum db。
+
 **`is_pinned` 的 OR 合并语义**：版面列表里看到的帖子，如果 DB 里已经被 `init:pinned` 标记为 pinned，**不会被新一次 upsert 抹掉**——SQL 是 `is_pinned = is_pinned OR $9`。
 
-### 楼层（posts）
+### 楼层（posts，存在 forum db 中）
 
 | 函数 | 签名 | 用途 |
 |---|---|---|
-| `upsertPosts` | `(threadId, posts: Post[]) => Promise<void>` | 批量写入楼层（事务包裹） |
+| `upsertPosts` | `(forumDb, threadId, posts: Post[]) => Promise<void>` | 批量写入楼层（事务包裹）。**首个参数是 forumDb 句柄**，从 upsertThread 拿到 |
 
 文件：[src/repository/posts.ts](../../src/repository/posts.ts)。
+
+**用法示例**：
+
+```typescript
+const { threadId, forumDb } = await upsertThread(siteKey, thread, { isPinned: true });
+await upsertPosts(forumDb, threadId, thread.posts);
+```
 
 ### 爬取进度（board_crawl_state）
 

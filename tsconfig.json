@@ -19,8 +19,6 @@
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": [
     "node_modules",
-    "dist",
-    "tests/unit/repository/**",
-    "tests/integration/mcp-server.test.ts"
+    "dist"
   ]
 }
