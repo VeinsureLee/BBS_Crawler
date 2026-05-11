@@ -13,7 +13,7 @@ async function main() {
   }
 
   const cfg = parseConfig(process.env);
-  initDb(cfg.pgDataDir);
+  initDb(cfg.dataDir);
 
   try {
     const result = await getDb().query<{
@@ -22,7 +22,7 @@ async function main() {
       board_key: string;
       url: string;
     }>(
-      `SELECT id, title, board_key, url FROM threads WHERE title ILIKE $1`,
+      `SELECT id, title, board_key, url FROM threads WHERE title LIKE $1`,
       [`%${searchTitle}%`]
     );
 

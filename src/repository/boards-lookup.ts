@@ -21,7 +21,7 @@ export async function findBoardByName(
 ): Promise<BoardRow | null> {
   try {
     const r = await getDb().query<{
-      id: string | number;
+      id: number;
       site_key: string;
       board_key: string;
       name: string;
@@ -52,7 +52,7 @@ export async function findBoardByName(
 export async function getBoardById(boardId: number): Promise<BoardRow | null> {
   try {
     const r = await getDb().query<{
-      id: string | number;
+      id: number;
       site_key: string;
       board_key: string;
       name: string;

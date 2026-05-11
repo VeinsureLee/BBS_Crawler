@@ -22,7 +22,7 @@ import { upsertSection } from '../../src/repository/sections';
 async function main() {
   const siteKey = process.argv[2] ?? 'school-bbs';
   const cfg = parseConfig(process.env);
-  initDb(cfg.pgDataDir);
+  initDb(cfg.dataDir);
 
   const adapter = getAdapter(siteKey);
   if (!adapter.listSections) {
@@ -63,7 +63,7 @@ async function main() {
       });
       console.log(`  [${sectionId}] ${s.sectionKey}  ${s.name}  ${s.url}`);
     }
-    console.log(`Persisted ${sections.length} sections to PGlite at ${cfg.pgDataDir}`);
+    console.log(`Persisted ${sections.length} sections to SQLite at ${cfg.dataDir}`);
   } finally {
     await ctx.close();
     await browser.close();

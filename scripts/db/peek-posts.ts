@@ -51,7 +51,7 @@ function truncate(s: string, n: number): string {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = parseConfig(process.env);
-  initDb(cfg.pgDataDir);
+  initDb(cfg.dataDir);
 
   try {
     const db = getDb();
@@ -68,7 +68,7 @@ async function main() {
     }
     if (args.title) {
       params.push(`%${args.title}%`);
-      where.push(`title ILIKE $${params.length}`);
+      where.push(`title LIKE $${params.length}`);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     params.push(args.limit);

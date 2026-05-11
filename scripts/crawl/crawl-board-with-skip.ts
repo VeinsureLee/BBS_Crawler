@@ -36,7 +36,7 @@ async function main() {
     process.exit(1);
   }
 
-  const dataDir = process.env.PGDATA_DIR ?? './.pgdata';
+  const dataDir = process.env.DATABASE_PATH ?? './.data';
   initDb(dataDir);
 
   const stateDir = process.env.STORAGE_STATE_DIR || './.state';

@@ -1,4 +1,4 @@
-import { getPool } from './db';
+import { getDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 export type FetchLogStatus = 'ok' | 'error' | 'rate_limited';
@@ -14,9 +14,9 @@ export interface FetchLogRow {
 
 export async function appendFetchLog(row: FetchLogRow): Promise<void> {
   try {
-    await getPool().query(
-      `INSERT INTO fetch_log (site_key, tool, args, status, error_code, duration_ms)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+    await getDb().query(
+      `INSERT INTO fetch_log (site_key, tool, args, status, error_code, duration_ms, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))`,
       [
         row.siteKey, row.tool, JSON.stringify(row.args),
         row.status, row.errorCode ?? null, row.durationMs ?? null,

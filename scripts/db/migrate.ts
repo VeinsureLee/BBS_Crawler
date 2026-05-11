@@ -1,15 +1,12 @@
 /**
- * Custom SQL migration runner for the embedded PGlite database.
- *
- * Replaces node-pg-migrate (which only speaks to a real PG server).
+ * Custom SQL migration runner for SQLite.
  *
  * Behavior:
  *   - Reads migrations/*.sql in lexical order.
  *   - Each file may contain "-- Up Migration" and "-- Down Migration" markers.
  *     Anything before "-- Down Migration" is the up SQL; anything after is
  *     the down SQL (commented out by convention, executed only with `down`).
- *   - Tracks applied migrations in a `pgmigrations` table (name compatible
- *     with the previous tool, so existing rows survive).
+ *   - Tracks applied migrations in a `migrations` table.
  *
  * Usage:
  *   npx tsx scripts/migrate.ts up      # apply all pending
@@ -66,44 +63,44 @@ function stripCommentMarkers(s: string): string {
     .trim();
 }
 
-async function ensureMigrationsTable(db: ReturnType<typeof initDb>) {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS pgmigrations (
-      id     bigserial PRIMARY KEY,
-      name   text NOT NULL UNIQUE,
-      run_on timestamptz NOT NULL DEFAULT now()
+async function ensureMigrationsTable(db: ReturnType<typeof initDb>): Promise<void> {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS migrations (
+      id     INTEGER PRIMARY KEY AUTOINCREMENT,
+      name   TEXT NOT NULL UNIQUE,
+      run_on TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 }
 
 async function getApplied(db: ReturnType<typeof initDb>): Promise<Set<string>> {
   const r = await db.query<{ name: string }>(
-    `SELECT name FROM pgmigrations ORDER BY id`,
+    `SELECT name FROM migrations ORDER BY id`,
   );
   return new Set(r.rows.map((row) => row.name));
 }
 
-async function applyOne(db: ReturnType<typeof initDb>, m: MigrationFile) {
+async function applyOne(db: ReturnType<typeof initDb>, m: MigrationFile): Promise<void> {
   if (!m.upSql) {
     console.log(`  ${m.name}: empty up section, skipping body`);
   } else {
     // exec() handles multi-statement SQL; query() only handles a single statement.
     await db.exec(m.upSql);
   }
-  await db.query(`INSERT INTO pgmigrations (name) VALUES ($1)`, [m.name]);
+  await db.query(`INSERT INTO migrations (name) VALUES ($1)`, [m.name]);
   console.log(`  applied ${m.name}`);
 }
 
-async function rollbackOne(db: ReturnType<typeof initDb>, m: MigrationFile) {
+async function rollbackOne(db: ReturnType<typeof initDb>, m: MigrationFile): Promise<void> {
   if (!m.downSql) {
     throw new Error(`Migration ${m.name} has no down section; refusing to roll back`);
   }
   await db.exec(m.downSql);
-  await db.query(`DELETE FROM pgmigrations WHERE name = $1`, [m.name]);
+  await db.query(`DELETE FROM migrations WHERE name = $1`, [m.name]);
   console.log(`  rolled back ${m.name}`);
 }
 
-async function up(db: ReturnType<typeof initDb>) {
+async function up(db: ReturnType<typeof initDb>): Promise<void> {
   await ensureMigrationsTable(db);
   const applied = await getApplied(db);
   const all = readMigrations();
@@ -116,7 +113,7 @@ async function up(db: ReturnType<typeof initDb>) {
   for (const m of pending) await applyOne(db, m);
 }
 
-async function down(db: ReturnType<typeof initDb>) {
+async function down(db: ReturnType<typeof initDb>): Promise<void> {
   await ensureMigrationsTable(db);
   const applied = await getApplied(db);
   const all = readMigrations();
@@ -129,7 +126,7 @@ async function down(db: ReturnType<typeof initDb>) {
   await rollbackOne(db, lastApplied);
 }
 
-async function status(db: ReturnType<typeof initDb>) {
+async function status(db: ReturnType<typeof initDb>): Promise<void> {
   await ensureMigrationsTable(db);
   const applied = await getApplied(db);
   const all = readMigrations();
@@ -139,10 +136,15 @@ async function status(db: ReturnType<typeof initDb>) {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const cmd = process.argv[2] ?? 'up';
-  const dataDir = process.env.PGDATA_DIR ?? './.pgdata';
-  console.log(`PGlite data dir: ${dataDir}`);
+  const dataDir = process.env.DATABASE_PATH ?? './.data';
+  console.log(`SQLite data dir: ${dataDir}`);
+
+  // Ensure data directory exists
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
 
   const db = initDb(dataDir);
   try {

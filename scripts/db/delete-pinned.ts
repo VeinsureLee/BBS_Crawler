@@ -28,19 +28,19 @@ async function deletePinnedThreads(siteKey: string): Promise<{ threadsDeleted: n
   const db = getDb();
 
   // First count what we're going to delete
-  const countResult = await db.query<{ thread_count: string; post_count: string }>(
-    `SELECT
-       COUNT(DISTINCT t.id) as thread_count,
-       COUNT(p.id) as post_count
-     FROM threads t
-     LEFT JOIN posts p ON t.id = p.thread_id
-     WHERE t.site_key = $1
-       AND (t.raw->>'pinned')::boolean = true`,
+  const threadResult = await db.query<{ c: number }>(
+    `SELECT count(*) as c FROM threads WHERE site_key = $1 AND is_pinned = 1`,
     [siteKey]
   );
+  const threadCount = threadResult.rows[0]!.c;
 
-  const threadCount = parseInt(countResult.rows[0]!.thread_count, 10);
-  const postCount = parseInt(countResult.rows[0]!.post_count, 10);
+  const postResult = await db.query<{ c: number }>(
+    `SELECT count(*) as c FROM posts WHERE thread_id IN (
+       SELECT id FROM threads WHERE site_key = $1 AND is_pinned = 1
+     )`,
+    [siteKey]
+  );
+  const postCount = postResult.rows[0]!.c;
 
   if (threadCount === 0) {
     console.log('No pinned threads found.');
@@ -57,7 +57,7 @@ async function deletePinnedThreads(siteKey: string): Promise<{ threadsDeleted: n
        WHERE thread_id IN (
          SELECT id FROM threads
          WHERE site_key = $1
-           AND (raw->>'pinned')::boolean = true
+           AND is_pinned = 1
        )`,
       [siteKey]
     );
@@ -66,7 +66,7 @@ async function deletePinnedThreads(siteKey: string): Promise<{ threadsDeleted: n
     await tx.query(
       `DELETE FROM threads
        WHERE site_key = $1
-         AND (raw->>'pinned')::boolean = true`,
+         AND is_pinned = 1`,
       [siteKey]
     );
   });
@@ -89,10 +89,16 @@ function deleteProgressFile(siteKey: string): void {
   }
 }
 
-async function main() {
+async function main(): Promise<void> {
   const { siteKey } = parseArgs();
   const cfg = parseConfig(process.env);
-  initDb(cfg.pgDataDir);
+
+  // Ensure data dir exists
+  if (!fs.existsSync(cfg.dataDir)) {
+    fs.mkdirSync(cfg.dataDir, { recursive: true });
+  }
+
+  initDb(cfg.dataDir);
 
   try {
     const { threadsDeleted, postsDeleted } = await deletePinnedThreads(siteKey);

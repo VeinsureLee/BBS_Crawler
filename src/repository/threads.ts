@@ -1,4 +1,4 @@
-import { getPool } from './db';
+import { getDb } from './db';
 import { DatabaseError } from '../core/errors';
 import type { Thread, ThreadSummary } from '../core/site-adapter';
 
@@ -22,8 +22,8 @@ export interface FetchSkippedResult {
  */
 export async function checkThreadExists(siteKey: string, url: string): Promise<ThreadExistsResult> {
   try {
-    const r = await getPool().query<{
-      id: string;
+    const r = await getDb().query<{
+      id: number;
       last_fetched_at: string;
       last_reply_at: string | null;
       reply_count: number | null;
@@ -54,7 +54,7 @@ export async function checkThreadExists(siteKey: string, url: string): Promise<T
  */
 export async function getCrawledThreadUrls(siteKey: string, boardKey?: string): Promise<Set<string>> {
   try {
-    const r = await getPool().query<{ url: string }>(
+    const r = await getDb().query<{ url: string }>(
       `SELECT url FROM threads WHERE site_key = $1 ${boardKey ? 'AND board_key = $2' : ''}`,
       boardKey ? [siteKey, boardKey] : [siteKey],
     );
@@ -116,36 +116,61 @@ export async function upsertThread(
 ): Promise<UpsertThreadResult> {
   const isPinned = options.isPinned ?? false;
   try {
-    const r = await getPool().query<{ id: string }>(
-      `INSERT INTO threads
-        (site_key, url, title, author, board_key,
-         posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
-       ON CONFLICT (site_key, url) DO UPDATE
-         SET title          = EXCLUDED.title,
-             author         = COALESCE(EXCLUDED.author, threads.author),
-             board_key      = COALESCE(EXCLUDED.board_key, threads.board_key),
-             posted_at      = COALESCE(EXCLUDED.posted_at, threads.posted_at),
-             last_reply_at  = COALESCE(EXCLUDED.last_reply_at, threads.last_reply_at),
-             reply_count    = COALESCE(EXCLUDED.reply_count, threads.reply_count),
-             view_count     = COALESCE(EXCLUDED.view_count, threads.view_count),
-             raw            = COALESCE(EXCLUDED.raw, threads.raw),
-             is_pinned      = threads.is_pinned OR EXCLUDED.is_pinned,
-             last_fetched_at = now()
-       RETURNING id`,
-      [
-        siteKey, t.url, t.title,
-        threadAuthor(t),
-        t.board ?? null,
-        t.posts[0]?.postedAt ?? null,
-        t.posts[t.posts.length - 1]?.postedAt ?? null,
-        t.posts.length > 0 ? t.posts.length - 1 : null,
-        null,
-        t.raw ? JSON.stringify(t.raw) : null,
-        isPinned,
-      ],
-    );
-    return { threadId: Number(r.rows[0]!.id) };
+    // First check if the thread exists
+    const existing = await checkThreadExists(siteKey, t.url);
+
+    if (existing.exists && existing.threadId) {
+      // Update existing thread
+      await getDb().query(
+        `UPDATE threads
+         SET title          = $1,
+             author         = COALESCE($2, author),
+             board_key      = COALESCE($3, board_key),
+             posted_at      = COALESCE($4, posted_at),
+             last_reply_at  = COALESCE($5, last_reply_at),
+             reply_count    = COALESCE($6, reply_count),
+             view_count     = COALESCE($7, view_count),
+             raw            = COALESCE($8, raw),
+             is_pinned      = is_pinned OR $9,
+             last_fetched_at = datetime('now')
+         WHERE id = $10`,
+        [
+          t.title,
+          threadAuthor(t),
+          t.board ?? null,
+          t.posts[0]?.postedAt ?? null,
+          t.posts[t.posts.length - 1]?.postedAt ?? null,
+          t.posts.length > 0 ? t.posts.length - 1 : null,
+          null,
+          t.raw ? JSON.stringify(t.raw) : null,
+          isPinned ? 1 : 0,
+          existing.threadId,
+        ],
+      );
+      return { threadId: existing.threadId };
+    } else {
+      // Insert new thread
+      await getDb().query(
+        `INSERT INTO threads
+          (site_key, url, title, author, board_key,
+           posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at, first_seen_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, datetime('now'), datetime('now'))`,
+        [
+          siteKey, t.url, t.title,
+          threadAuthor(t),
+          t.board ?? null,
+          t.posts[0]?.postedAt ?? null,
+          t.posts[t.posts.length - 1]?.postedAt ?? null,
+          t.posts.length > 0 ? t.posts.length - 1 : null,
+          null,
+          t.raw ? JSON.stringify(t.raw) : null,
+          isPinned ? 1 : 0,
+        ],
+      );
+      // Get the last inserted id
+      const r = await getDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
+      return { threadId: r.rows[0]!.id };
+    }
   } catch (e) {
     throw new DatabaseError(`upsertThread failed for ${t.url}`, e);
   }
@@ -173,36 +198,61 @@ export async function upsertThreadSummary(
 ): Promise<UpsertThreadResult> {
   const isPinned = options.isPinned ?? false;
   try {
-    const r = await getPool().query<{ id: string }>(
-      `INSERT INTO threads
-        (site_key, url, title, author, board_key,
-         posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
-       ON CONFLICT (site_key, url) DO UPDATE
-         SET title          = EXCLUDED.title,
-             author         = COALESCE(EXCLUDED.author, threads.author),
-             board_key      = COALESCE(EXCLUDED.board_key, threads.board_key),
-             posted_at      = COALESCE(EXCLUDED.posted_at, threads.posted_at),
-             last_reply_at  = COALESCE(EXCLUDED.last_reply_at, threads.last_reply_at),
-             reply_count    = COALESCE(EXCLUDED.reply_count, threads.reply_count),
-             view_count     = COALESCE(EXCLUDED.view_count, threads.view_count),
-             raw            = COALESCE(EXCLUDED.raw, threads.raw),
-             is_pinned      = threads.is_pinned OR EXCLUDED.is_pinned,
-             last_fetched_at = now()
-       RETURNING id`,
-      [
-        siteKey, s.url, s.title,
-        s.author ?? null,
-        s.board ?? null,
-        s.postedAt ?? null,
-        s.lastReplyAt ?? null,
-        s.replyCount ?? null,
-        s.viewCount ?? null,
-        s.raw ? JSON.stringify(s.raw) : null,
-        isPinned,
-      ],
-    );
-    return { threadId: Number(r.rows[0]!.id) };
+    // First check if the thread exists
+    const existing = await checkThreadExists(siteKey, s.url);
+
+    if (existing.exists && existing.threadId) {
+      // Update existing thread
+      await getDb().query(
+        `UPDATE threads
+         SET title          = $1,
+             author         = COALESCE($2, author),
+             board_key      = COALESCE($3, board_key),
+             posted_at      = COALESCE($4, posted_at),
+             last_reply_at  = COALESCE($5, last_reply_at),
+             reply_count    = COALESCE($6, reply_count),
+             view_count     = COALESCE($7, view_count),
+             raw            = COALESCE($8, raw),
+             is_pinned      = is_pinned OR $9,
+             last_fetched_at = datetime('now')
+         WHERE id = $10`,
+        [
+          s.title,
+          s.author ?? null,
+          s.board ?? null,
+          s.postedAt ?? null,
+          s.lastReplyAt ?? null,
+          s.replyCount ?? null,
+          s.viewCount ?? null,
+          s.raw ? JSON.stringify(s.raw) : null,
+          isPinned ? 1 : 0,
+          existing.threadId,
+        ],
+      );
+      return { threadId: existing.threadId };
+    } else {
+      // Insert new thread
+      await getDb().query(
+        `INSERT INTO threads
+          (site_key, url, title, author, board_key,
+           posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at, first_seen_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, datetime('now'), datetime('now'))`,
+        [
+          siteKey, s.url, s.title,
+          s.author ?? null,
+          s.board ?? null,
+          s.postedAt ?? null,
+          s.lastReplyAt ?? null,
+          s.replyCount ?? null,
+          s.viewCount ?? null,
+          s.raw ? JSON.stringify(s.raw) : null,
+          isPinned ? 1 : 0,
+        ],
+      );
+      // Get the last inserted id
+      const r = await getDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
+      return { threadId: r.rows[0]!.id };
+    }
   } catch (e) {
     throw new DatabaseError(`upsertThreadSummary failed for ${s.url}`, e);
   }

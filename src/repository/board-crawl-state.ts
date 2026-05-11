@@ -4,7 +4,7 @@ import { DatabaseError } from '../core/errors';
 /**
  * Per-board crawl progress used by forum_list_threads to:
  *   - resume incremental crawls (stop when posted_at <= latest_thread_posted_at)
- *   - report deepest page ever reached so agents can pick up paging history
+ *   - report deepest page ever reached so agents can pick up paging history.
  */
 export interface BoardCrawlState {
   boardId: number;
@@ -27,7 +27,7 @@ export interface UpsertBoardCrawlStateInput {
 export async function getBoardCrawlState(boardId: number): Promise<BoardCrawlState | null> {
   try {
     const r = await getDb().query<{
-      board_id: string | number;
+      board_id: number;
       deepest_page_crawled: number;
       latest_thread_posted_at: string | null;
       last_crawled_at: string | null;
@@ -54,29 +54,63 @@ export async function getBoardCrawlState(boardId: number): Promise<BoardCrawlSta
 
 export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): Promise<void> {
   try {
-    await getDb().query(
-      `INSERT INTO board_crawl_state
-         (board_id, deepest_page_crawled, latest_thread_posted_at, last_crawled_at, last_thread_key)
-       VALUES ($1, COALESCE($2, 0), $3, $4, $5)
-       ON CONFLICT (board_id) DO UPDATE SET
-         deepest_page_crawled = GREATEST(
-           board_crawl_state.deepest_page_crawled,
-           COALESCE(EXCLUDED.deepest_page_crawled, board_crawl_state.deepest_page_crawled)
-         ),
-         latest_thread_posted_at = GREATEST(
-           board_crawl_state.latest_thread_posted_at,
-           COALESCE(EXCLUDED.latest_thread_posted_at, board_crawl_state.latest_thread_posted_at)
-         ),
-         last_crawled_at = COALESCE(EXCLUDED.last_crawled_at, board_crawl_state.last_crawled_at),
-         last_thread_key = COALESCE(EXCLUDED.last_thread_key, board_crawl_state.last_thread_key)`,
-      [
-        input.boardId,
-        input.deepestPageCrawled ?? null,
-        input.latestThreadPostedAt ?? null,
-        input.lastCrawledAt ?? null,
-        input.lastThreadKey ?? null,
-      ],
+    // Check if crawl state exists
+    const exists = await getDb().query<{
+      deepest_page_crawled: number;
+      latest_thread_posted_at: string | null;
+    }>(
+      `SELECT deepest_page_crawled, latest_thread_posted_at
+       FROM board_crawl_state
+       WHERE board_id = $1`,
+      [input.boardId]
     );
+
+    if (exists.rows.length > 0) {
+      // Update existing - compute max values
+      const existingRow = exists.rows[0]!;
+      const newDeepest = input.deepestPageCrawled !== undefined
+        ? Math.max(existingRow.deepest_page_crawled, input.deepestPageCrawled)
+        : existingRow.deepest_page_crawled;
+
+      // Compare timestamps as strings (ISO format is lex order comparable)
+      let newLatestPosted = existingRow.latest_thread_posted_at;
+      if (input.latestThreadPostedAt) {
+        if (!existingRow.latest_thread_posted_at ||
+            input.latestThreadPostedAt > existingRow.latest_thread_posted_at) {
+          newLatestPosted = input.latestThreadPostedAt;
+        }
+      }
+
+      await getDb().query(
+        `UPDATE board_crawl_state
+         SET deepest_page_crawled = $1,
+             latest_thread_posted_at = $2,
+             last_crawled_at = COALESCE($3, last_crawled_at),
+             last_thread_key = COALESCE($4, last_thread_key)
+         WHERE board_id = $5`,
+        [
+          newDeepest,
+          newLatestPosted,
+          input.lastCrawledAt ?? null,
+          input.lastThreadKey ?? null,
+          input.boardId,
+        ],
+      );
+    } else {
+      // Insert new
+      await getDb().query(
+        `INSERT INTO board_crawl_state
+           (board_id, deepest_page_crawled, latest_thread_posted_at, last_crawled_at, last_thread_key)
+         VALUES ($1, COALESCE($2, 0), $3, $4, $5)`,
+        [
+          input.boardId,
+          input.deepestPageCrawled ?? null,
+          input.latestThreadPostedAt ?? null,
+          input.lastCrawledAt ?? null,
+          input.lastThreadKey ?? null,
+        ],
+      );
+    }
   } catch (e) {
     throw new DatabaseError(`upsertBoardCrawlState failed for board ${input.boardId}`, e);
   }

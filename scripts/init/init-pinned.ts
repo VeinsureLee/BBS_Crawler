@@ -211,7 +211,7 @@ async function main() {
   const { siteKey, limit, concurrency: concurrencyOverride, skipDone } = parseArgs();
   const cfg = parseConfig(process.env);
   const siteConfig = loadSiteConfig(siteKey);
-  initDb(cfg.pgDataDir);
+  initDb(cfg.dataDir);
 
   const adapter = getAdapter(siteKey);
   if (!adapter.listPinnedThreadIds || !adapter.getThread) {

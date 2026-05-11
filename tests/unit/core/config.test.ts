@@ -5,7 +5,7 @@ import { MissingCredentialsError } from '../../../src/core/errors';
 describe('parseConfig', () => {
   it('parses minimal env with defaults', () => {
     const cfg = parseConfig({});
-    expect(cfg.pgDataDir).toBe('./.pgdata');
+    expect(cfg.dataDir).toBe('./.data');
     expect(cfg.browserHeadless).toBe(true);
     expect(cfg.rateMinIntervalMs).toBe(1500);
     expect(cfg.rateJitterMs).toBe(1000);
@@ -17,12 +17,12 @@ describe('parseConfig', () => {
 
   it('overrides via env values', () => {
     const cfg = parseConfig({
-      PGDATA_DIR: './data/pglite',
+      DATABASE_PATH: './data/sqlite',
       BROWSER_HEADLESS: 'false',
       RATE_MIN_INTERVAL_MS: '2500',
       LOG_LEVEL: 'debug',
     });
-    expect(cfg.pgDataDir).toBe('./data/pglite');
+    expect(cfg.dataDir).toBe('./data/sqlite');
     expect(cfg.browserHeadless).toBe(false);
     expect(cfg.rateMinIntervalMs).toBe(2500);
     expect(cfg.logLevel).toBe('debug');

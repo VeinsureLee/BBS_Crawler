@@ -1,6 +1,6 @@
 # BBS_Crawler
 
-基于 Playwright 的 MCP 服务，爬取论坛帖子并落库到本地 PostgreSQL。作为 **BBS Agent of BYR** 项目的数据摄取层。
+基于 Playwright 的 MCP 服务，爬取论坛帖子并落库到本地 SQLite。作为 **BBS Agent of BYR** 项目的数据摄取层。
 
 > 状态：**稳定可用，生产就绪**——完整 `school-bbs` 生命周期实现，4 个 MCP tool 工作正常，所有 smoke test 已通过。English version: [`README.md`](README.md)。
 
@@ -10,7 +10,7 @@
 - 通过 Playwright 驱动真实 Chromium 浏览器，拿到登录后才可见的页面。
 - 用 Playwright 的 `storageState` 持久化登录会话——agent 不需要每次都重新提交账密。
 - 可选的本地加密凭据缓存（AES-256-GCM）：cookie 失效时不强迫用户手动重登（前提是登录时选择了"记住密码"）。
-- 爬到的内容**总是**写入嵌入式 PGlite。`threads` 单表通过 `is_pinned` 字段区分初始化时抓的置顶帖与按需爬的日常帖；`board_crawl_state` 记录每个版面的爬取进度，支持 agent 增量只拉新帖。
+- 爬到的内容**总是**写入嵌入式 SQLite。`threads` 单表通过 `is_pinned` 字段区分初始化时抓的置顶帖与按需爬的日常帖；`board_crawl_state` 记录每个版面的爬取进度，支持 agent 增量只拉新帖。
 - 下游查询 / RAG / embedding 由独立的 [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) 项目负责——本 MCP 只爬取与持久化。
 - 站点适配器可插拔：内置 `school-bbs` 适配器；新站点只需在 `src/adapters/<site>/` 下加一个文件。
 
@@ -18,17 +18,17 @@
 
 | 仓库 | 职责 |
 |---|---|
-| [`BBS_Crawler`](https://github.com/VeinsureLee/BBS_Crawler)（本仓库） | 浏览器爬虫 + MCP 服务，写 PostgreSQL |
-| [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) | 存储栈：PostgreSQL（原文）+ Chroma（向量）+ Neo4j（关系） |
+| [`BBS_Crawler`](https://github.com/VeinsureLee/BBS_Crawler)（本仓库） | 浏览器爬虫 + MCP 服务，写 SQLite |
+| [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) | 存储栈：SQLite（原文）+ Chroma（向量）+ Neo4j（关系） |
 | [`BBS_Agent`](https://github.com/VeinsureLee/BBS_Agent) | 多索引 RAG agent，消费本 MCP 并查询数据库 |
 
-本爬虫**拥有**论坛内容的 PostgreSQL schema。`BBS_Database` 读同一个 PostgreSQL，下游做 embedding / 图索引。
+本爬虫**拥有**论坛内容的 SQLite schema。`BBS_Database` 读同一个 SQLite，下游做 embedding / 图索引。
 
 ## 技术栈
 
 - TypeScript（Node 20+）
 - [Playwright](https://playwright.dev/)（仅 chromium）
-- [PGlite](https://pglite.dev/)（嵌入式 PostgreSQL，无需外部数据库）
+- [SQLite](https://pglite.dev/)（嵌入式 SQLite，无需外部数据库）
 - [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk)（stdio 传输）
 - `zod` 做 env / 入参校验，`pino` 做结构化日志
 
@@ -149,7 +149,7 @@ forum_get_thread({ siteKey: string, threadId: string })   // threadId = "{boardK
 
 | 变量 | 说明 |
 |---|---|
-| `PGDATA_DIR` | PGlite 数据存储目录（默认 `./.pgdata`） |
+| `PGDATA_DIR` | SQLite 数据存储目录（默认 `./.pgdata`） |
 | `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | 每个站点的凭据和地址，如 `SCHOOL_BBS_USERNAME` |
 | `BROWSER_HEADLESS` | 调试时设 `false`（默认 `true`） |
 | `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | 每站点的礼貌策略（默认 1500 / 1000 / 1） |
@@ -254,7 +254,7 @@ scripts/             一次性 CLI 工具（login-once、inspect）
 
 下一步：
 
-- 修复 `tests/unit/repository/**` 单元测试套件（PGlite 迁移后被排除，需要重写）
+- 修复 `tests/unit/repository/**` 单元测试套件（SQLite 迁移后被排除，需要重写）
 
 v1 范围外（已显式延后）：验证码 / SSO / 2FA、低层 `browser_*` MCP tool、`school-bbs` 之外的更多站点、中文分词 FTS、定时调度器、分布式部署、MCP 内的搜索/缓存读取工具（由 `BBS_Database` 负责）。
 

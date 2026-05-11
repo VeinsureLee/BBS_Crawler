@@ -1,6 +1,6 @@
 # BBS_Crawler
 
-A Playwright-based MCP server that crawls forum posts and persists them to a local PostgreSQL database. Designed as the data-ingestion layer of the **BBS Agent of BYR** project.
+A Playwright-based MCP server that crawls forum posts and persists them to a local SQLite database. Designed as the data-ingestion layer of the **BBS Agent of BYR** project.
 
 > Status: **stable, production-ready** — full `school-bbs` lifecycle complete, 4 MCP tools working, all smoke tests passing. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
 
@@ -10,7 +10,7 @@ A Playwright-based MCP server that crawls forum posts and persists them to a loc
 - Drives a real Chromium browser via Playwright so login-gated pages are reachable.
 - Persists login sessions via Playwright `storageState` — the agent never re-submits credentials on every call.
 - Optional encrypted local credential cache (AES-256-GCM) so cookies-expiry doesn't force a manual re-login when the user opted into "remember password".
-- Always upserts crawled content to the embedded PGlite database. Single-table `threads` with `is_pinned` flag separates init-time pinned threads from on-demand crawled threads; `board_crawl_state` tracks per-board crawl progress so the agent can incrementally pull only what's new.
+- Always upserts crawled content to the embedded SQLite database. Single-table `threads` with `is_pinned` flag separates init-time pinned threads from on-demand crawled threads; `board_crawl_state` tracks per-board crawl progress so the agent can incrementally pull only what's new.
 - Downstream query / RAG / embeddings live in the [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) project — this MCP only crawls and persists.
 - Pluggable site adapters: ships with a `school-bbs` adapter; new sites are added by dropping a file under `src/adapters/<site>/`.
 
@@ -19,16 +19,16 @@ A Playwright-based MCP server that crawls forum posts and persists them to a loc
 | Repo | Role |
 |---|---|
 | [`BBS_Crawler`](https://github.com/VeinsureLee/BBS_Crawler) (this repo) | Browser-driven crawler + MCP server; writes Postgres |
-| [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) | Storage stack: PostgreSQL (raw) + Chroma (embeddings) + Neo4j (relations) |
+| [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) | Storage stack: SQLite (raw) + Chroma (embeddings) + Neo4j (relations) |
 | [`BBS_Agent`](https://github.com/VeinsureLee/BBS_Agent) | Multi-Index RAG agent that consumes the MCP and queries the database |
 
-This crawler **owns** the PostgreSQL schema for forum content. `BBS_Database` reads the same Postgres to build embeddings / graph indexes downstream.
+This crawler **owns** the SQLite schema for forum content. `BBS_Database` reads the same Postgres to build embeddings / graph indexes downstream.
 
 ## Tech stack
 
 - TypeScript (Node 20+)
 - [Playwright](https://playwright.dev/) (Chromium only)
-- [PGlite](https://pglite.dev/) (embedded PostgreSQL, no external DB required)
+- [SQLite](https://pglite.dev/) (embedded SQLite, no external DB required)
 - [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) for MCP transport (stdio)
 - `zod` for env / input validation, `pino` for structured logging
 
@@ -147,7 +147,7 @@ All secrets live in environment variables. The headline ones:
 
 | Var | Purpose |
 |---|---|
-| `PGDATA_DIR` | Path for PGlite storage directory (default: `./.pgdata`) |
+| `PGDATA_DIR` | Path for SQLite storage directory (default: `./.pgdata`) |
 | `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | Per-site credentials and base URL, e.g. `SCHOOL_BBS_USERNAME` |
 | `BROWSER_HEADLESS` | `false` for visual debugging (default `true`) |
 | `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | Per-site politeness knobs (defaults: 1500 / 1000 / 1) |
@@ -252,7 +252,7 @@ Already landed:
 
 Next up:
 
-- Restore the unit test suite for `tests/unit/repository/**` (currently excluded after the PGlite migration)
+- Restore the unit test suite for `tests/unit/repository/**` (currently excluded after the SQLite migration)
 
 Out of scope for v1 (deferred): CAPTCHA / SSO / 2FA login, low-level `browser_*` MCP tools, additional site adapters beyond `school-bbs`, Chinese tokenizer FTS, background scheduler, multi-worker deployment, in-MCP search / cache-read tools (handled by `BBS_Database`).
 

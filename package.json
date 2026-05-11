@@ -43,9 +43,9 @@
     "format:html": "tsx scripts/util/format-html.ts"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.4.5",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@types/js-yaml": "^4.0.9",
+    "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",
     "js-yaml": "^4.1.1",
     "pino": "^9.4.0",
@@ -53,6 +53,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^20.14.10",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3",

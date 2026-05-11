@@ -16,9 +16,8 @@ const intFromEnv = z.preprocess((v) => {
 }, z.number().int().nonnegative());
 
 const ConfigSchema = z.object({
-  // Path to the local PGlite data directory. Defaults to ./.pgdata.
-  // (Replaces the old DATABASE_URL — PG is now embedded.)
-  PGDATA_DIR: z.string().default('./.pgdata'),
+  // Path to the local SQLite database directory
+  DATABASE_PATH: z.string().default('./.data'),
   BROWSER_HEADLESS: boolFromEnv.default(true),
   BROWSER_EXECUTABLE_PATH: z.string().optional(),
   BROWSER_USER_AGENT: z.string().optional(),
@@ -31,7 +30,7 @@ const ConfigSchema = z.object({
 });
 
 export interface AppConfig {
-  pgDataDir: string;
+  dataDir: string;
   browserHeadless: boolean;
   browserExecutablePath: string | undefined;
   browserUserAgent: string | undefined;
@@ -46,7 +45,7 @@ export interface AppConfig {
 export function parseConfig(env: NodeJS.ProcessEnv | Record<string, string | undefined>): AppConfig {
   const raw = ConfigSchema.parse(env);
   return {
-    pgDataDir: raw.PGDATA_DIR,
+    dataDir: raw.DATABASE_PATH,
     browserHeadless: raw.BROWSER_HEADLESS,
     browserExecutablePath: raw.BROWSER_EXECUTABLE_PATH,
     browserUserAgent: raw.BROWSER_USER_AGENT,

@@ -90,7 +90,7 @@ async function main() {
   const siteKey = process.argv[2] ?? 'school-bbs';
   const cfg = parseConfig(process.env);
   const siteConfig = loadSiteConfig(siteKey);
-  initDb(cfg.pgDataDir);
+  initDb(cfg.dataDir);
 
   const requestIntervalMs = siteConfig.crawl.structureRequestIntervalMs;
 
