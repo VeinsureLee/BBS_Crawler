@@ -1,37 +1,34 @@
 /**
- * Quick health-check for the SQLite database.
+ * Quick health-check for the SQLite databases.
  *
  * Usage:
- *   npx tsx scripts/check-db.ts
+ *   npx tsx scripts/db/check-db.ts
  *
  * Reports which migrations have been applied and the row count of every
  * known table. Creates the data dir on first run if missing.
  */
 import 'dotenv/config';
 import * as fs from 'fs';
-import { initDb, closeDb } from '../../src/repository/db';
+import { initDbs, closeDbs, getStructureDb, getContentDb } from '../../src/repository/db';
+import type { Db } from '../../src/repository/db';
 
-const TABLES = [
+const STRUCTURE_TABLES = [
   'sites',
   'sections',
   'boards',
-  'threads',
-  'posts',
-  'fetch_log',
   'board_crawl_state',
   'migrations',
 ] as const;
 
-async function main(): Promise<void> {
-  const dataDir = process.env.DATABASE_PATH ?? './.data';
-  console.log(`SQLite data dir: ${dataDir}`);
+const CONTENT_TABLES = [
+  'threads',
+  'posts',
+  'fetch_log',
+  'migrations',
+] as const;
 
-  // Ensure data dir exists
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  const db = initDb(dataDir);
+async function checkDb(label: string, db: Db, tables: readonly string[]): Promise<void> {
+  console.log(`\n=== ${label} ===`);
 
   // Get existing tables from SQLite master
   const existing = await db.query<{ name: string }>(
@@ -42,7 +39,7 @@ async function main(): Promise<void> {
   const present = new Set(existing.rows.map((r) => r.name));
 
   console.log('\nTables:');
-  for (const name of TABLES) {
+  for (const name of tables) {
     if (!present.has(name)) {
       console.log(`  ${name.padEnd(20)} (missing)`);
       continue;
@@ -52,14 +49,31 @@ async function main(): Promise<void> {
   }
 
   if (present.has('migrations')) {
-    const r = await db.query<{ name: string; run_on: string }>(
-      `SELECT name, run_on FROM migrations ORDER BY id`,
+    const r = await db.query<{ name: string; applied_at: string }>(
+      `SELECT name, applied_at FROM migrations ORDER BY id`,
     );
     console.log('\nMigrations applied:');
     for (const row of r.rows) console.log(`  ${row.name}`);
   }
+}
 
-  await closeDb();
+async function main(): Promise<void> {
+  const dataDir = process.env.DATABASE_PATH ?? './data';
+  console.log(`SQLite data dir: ${dataDir}`);
+
+  // Ensure data dir exists
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  initDbs({ dataDir });
+
+  try {
+    await checkDb('structure.db', getStructureDb(), STRUCTURE_TABLES);
+    await checkDb('content.db', getContentDb(), CONTENT_TABLES);
+  } finally {
+    await closeDbs();
+  }
 }
 
 main().catch((err) => {

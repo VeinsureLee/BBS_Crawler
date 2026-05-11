@@ -13,7 +13,7 @@
  */
 import 'dotenv/config';
 import { parseConfig } from '../../src/core/config';
-import { initDb, closeDb, getDb } from '../../src/repository/db';
+import { initDbs, closeDbs, getContentDb } from '../../src/repository/db';
 
 interface Args {
   limit: number;
@@ -51,10 +51,10 @@ function truncate(s: string, n: number): string {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = parseConfig(process.env);
-  initDb(cfg.dataDir);
+  initDbs({ dataDir: cfg.dataDir });
 
   try {
-    const db = getDb();
+    const db = getContentDb();
 
     const where: string[] = [];
     const params: unknown[] = [];
@@ -144,7 +144,7 @@ async function main() {
     console.log('\n' + '='.repeat(80));
     console.log(`显示了 ${threads.rows.length} 个 thread。提示: 加 --full 查看完整正文，--html 查看 HTML 原文。`);
   } finally {
-    await closeDb();
+    await closeDbs();
   }
 }
 

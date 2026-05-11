@@ -10,12 +10,13 @@ import {
   SessionExpiredError,
   NavigationTimeoutError,
   RateLimitedError,
+  BoardNotFoundError,
+  FetchFailedError,
 } from './errors';
 import { logger } from '../util/logger';
 import { shouldSkipFetch, upsertThreadSummary } from '../repository/threads';
 import { findBoardByName } from '../repository/boards-lookup';
 import { getBoardCrawlState, upsertBoardCrawlState } from '../repository/board-crawl-state';
-import { McpToolError } from '../server/error-codes';
 import type { InitOrchestrator } from './init-orchestrator';
 
 export interface CrawlerServiceDeps {
@@ -187,8 +188,7 @@ export class CrawlerService {
   async listThreadsByName(input: ListThreadsByNameInput): Promise<ListThreadsByNameOutput> {
     const board = await findBoardByName(input.siteKey, input.boardName);
     if (!board) {
-      throw new McpToolError(
-        'BOARD_NOT_FOUND',
+      throw new BoardNotFoundError(
         `board "${input.boardName}" not found in ${input.siteKey}`,
       );
     }
@@ -273,8 +273,7 @@ export class CrawlerService {
   async fetchThreadById(input: FetchThreadByIdInput): Promise<Thread> {
     const m = /^([^/]+)\/(\d+)$/.exec(input.threadId);
     if (!m) {
-      throw new McpToolError(
-        'BOARD_NOT_FOUND',
+      throw new BoardNotFoundError(
         `invalid threadId "${input.threadId}" — expected "{boardKey}/{articleId}"`,
       );
     }
@@ -282,7 +281,7 @@ export class CrawlerService {
     const articleId = m[2]!;
     const baseUrl = process.env.SCHOOL_BBS_BASE_URL;
     if (!baseUrl) {
-      throw new McpToolError('FETCH_FAILED', 'SCHOOL_BBS_BASE_URL not set');
+      throw new FetchFailedError('SCHOOL_BBS_BASE_URL not set');
     }
     const url = `${baseUrl.replace(/\/+$/, '')}/article/${boardKey}/${articleId}`;
     const fetchInput: FetchThreadInput = { siteKey: input.siteKey, url, persist: true };

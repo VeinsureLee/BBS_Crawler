@@ -3,7 +3,7 @@
  */
 import 'dotenv/config';
 import { parseConfig } from '../../src/core/config';
-import { initDb, closeDb, getDb } from '../../src/repository/db';
+import { initDbs, closeDbs, getContentDb } from '../../src/repository/db';
 
 async function main() {
   const searchTitle = process.argv[2];
@@ -13,10 +13,10 @@ async function main() {
   }
 
   const cfg = parseConfig(process.env);
-  initDb(cfg.dataDir);
+  initDbs({ dataDir: cfg.dataDir });
 
   try {
-    const result = await getDb().query<{
+    const result = await getContentDb().query<{
       id: number;
       title: string;
       board_key: string;
@@ -39,7 +39,7 @@ async function main() {
       console.log(`---`);
     }
   } finally {
-    await closeDb();
+    await closeDbs();
   }
 }
 

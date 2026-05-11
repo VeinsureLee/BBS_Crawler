@@ -28,7 +28,7 @@ import * as path from 'path';
 import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteConfig } from '../../src/core/site-config';
-import { initDb, closeDb } from '../../src/repository/db';
+import { initDbs, closeDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { listBoards } from '../../src/repository/boards';
 import { upsertThread } from '../../src/repository/threads';
@@ -211,7 +211,7 @@ async function main() {
   const { siteKey, limit, concurrency: concurrencyOverride, skipDone } = parseArgs();
   const cfg = parseConfig(process.env);
   const siteConfig = loadSiteConfig(siteKey);
-  initDb(cfg.dataDir);
+  initDbs({ dataDir: cfg.dataDir });
 
   const adapter = getAdapter(siteKey);
   if (!adapter.listPinnedThreadIds || !adapter.getThread) {
@@ -313,7 +313,7 @@ async function main() {
   } finally {
     await ctx.close();
     await browser.close();
-    await closeDb();
+    await closeDbs();
   }
 }
 

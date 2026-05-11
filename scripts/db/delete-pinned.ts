@@ -11,7 +11,7 @@
 import 'dotenv/config';
 import * as fs from 'fs';
 import { parseConfig } from '../../src/core/config';
-import { initDb, closeDb, getDb } from '../../src/repository/db';
+import { initDbs, closeDbs, getContentDb, type TxClient } from '../../src/repository/db';
 
 const PROGRESS_FILE = './.init-pinned.progress.json';
 
@@ -25,7 +25,7 @@ function parseArgs(): CliArgs {
 }
 
 async function deletePinnedThreads(siteKey: string): Promise<{ threadsDeleted: number; postsDeleted: number }> {
-  const db = getDb();
+  const db = getContentDb();
 
   // First count what we're going to delete
   const threadResult = await db.query<{ c: number }>(
@@ -50,7 +50,7 @@ async function deletePinnedThreads(siteKey: string): Promise<{ threadsDeleted: n
   console.log(`Found ${threadCount} pinned threads with ${postCount} posts. Deleting...`);
 
   // Delete posts first (due to foreign key constraint), then threads
-  await db.transaction(async (tx) => {
+  await db.transaction(async (tx: TxClient) => {
     // Delete posts associated with pinned threads
     await tx.query(
       `DELETE FROM posts
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     fs.mkdirSync(cfg.dataDir, { recursive: true });
   }
 
-  initDb(cfg.dataDir);
+  initDbs({ dataDir: cfg.dataDir });
 
   try {
     const { threadsDeleted, postsDeleted } = await deletePinnedThreads(siteKey);
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     deleteProgressFile(siteKey);
     console.log('Done. You can now re-run init:pinned to crawl again.');
   } finally {
-    await closeDb();
+    await closeDbs();
   }
 }
 

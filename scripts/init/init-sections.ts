@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { chromium } from 'playwright';
 import { parseConfig } from '../../src/core/config';
-import { initDb, closeDb } from '../../src/repository/db';
+import { initDbs, closeDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { upsertSite } from '../../src/repository/sites';
 import { upsertSection } from '../../src/repository/sections';
@@ -22,7 +22,7 @@ import { upsertSection } from '../../src/repository/sections';
 async function main() {
   const siteKey = process.argv[2] ?? 'school-bbs';
   const cfg = parseConfig(process.env);
-  initDb(cfg.dataDir);
+  initDbs({ dataDir: cfg.dataDir });
 
   const adapter = getAdapter(siteKey);
   if (!adapter.listSections) {
@@ -67,7 +67,7 @@ async function main() {
   } finally {
     await ctx.close();
     await browser.close();
-    await closeDb();
+    await closeDbs();
   }
 }
 

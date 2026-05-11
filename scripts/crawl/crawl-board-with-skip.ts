@@ -13,7 +13,7 @@ import 'dotenv/config';
 import '../../src/adapters/index';
 import { chromium } from 'playwright';
 import * as path from 'path';
-import { initDb, closeDb } from '../../src/repository/db';
+import { initDbs, closeDbs } from '../../src/repository/db';
 import { loadSiteConfig } from '../../src/core/site-config';
 import { BrowserPool } from '../../src/core/browser-pool';
 import { createRateLimiter } from '../../src/core/rate-limiter';
@@ -36,8 +36,8 @@ async function main() {
     process.exit(1);
   }
 
-  const dataDir = process.env.DATABASE_PATH ?? './.data';
-  initDb(dataDir);
+  const dataDir = process.env.DATABASE_PATH ?? './data';
+  initDbs({ dataDir });
 
   const stateDir = process.env.STORAGE_STATE_DIR || './.state';
   const browserPool = new BrowserPool({
@@ -132,7 +132,7 @@ async function main() {
     console.log(`  Fetched: ${successCount}`);
 
   } finally {
-    await closeDb();
+    await closeDbs();
   }
 }
 

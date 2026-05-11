@@ -6,10 +6,13 @@
   "engines": {
     "node": ">=20"
   },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:tsc": "tsc -p tsconfig.json --noEmit",
@@ -21,6 +24,7 @@
     "init:boards": "tsx scripts/init/init-boards.ts",
     "init:pinned": "tsx scripts/init/init-pinned.ts",
     "init": "npm run init:sections && npm run init:boards && npm run init:pinned",
+    "init:export": "tsx scripts/init/export-structure.ts",
 
     "db:check": "tsx scripts/db/check-db.ts",
     "db:migrate:up": "tsx scripts/db/migrate.ts up",
@@ -43,7 +47,6 @@
     "format:html": "tsx scripts/util/format-html.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@types/js-yaml": "^4.0.9",
     "better-sqlite3": "^11.5.0",
     "dotenv": "^16.4.5",

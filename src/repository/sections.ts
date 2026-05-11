@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 export interface UpsertSectionInput {
@@ -18,7 +18,7 @@ export interface SectionRow {
 
 export async function hasSections(siteKey: string): Promise<boolean> {
   try {
-    const r = await getDb().query<{ c: number }>(
+    const r = await getStructureDb().query<{ c: number }>(
       `SELECT count(*) as c FROM sections WHERE site_key = $1`,
       [siteKey],
     );
@@ -34,7 +34,7 @@ export async function hasSections(siteKey: string): Promise<boolean> {
  */
 export async function sectionsMissingBoards(siteKey: string): Promise<SectionRow[]> {
   try {
-    const r = await getDb().query<{ id: number; section_key: string; name: string | null }>(
+    const r = await getStructureDb().query<{ id: number; section_key: string; name: string | null }>(
       `SELECT s.id, s.section_key, s.name
          FROM sections s
          LEFT JOIN boards b ON b.section_id = s.id
@@ -56,7 +56,7 @@ export async function sectionsMissingBoards(siteKey: string): Promise<SectionRow
 
 export async function listTopLevelSections(siteKey: string): Promise<SectionRow[]> {
   try {
-    const r = await getDb().query<{ id: number; section_key: string; name: string | null }>(
+    const r = await getStructureDb().query<{ id: number; section_key: string; name: string | null }>(
       `SELECT id, section_key, name FROM sections
        WHERE site_key = $1 AND parent_section_id IS NULL
        ORDER BY id`,
@@ -75,7 +75,7 @@ export async function listTopLevelSections(siteKey: string): Promise<SectionRow[
 export async function upsertSection(input: UpsertSectionInput): Promise<UpsertSectionResult> {
   try {
     // Check if section exists
-    const exists = await getDb().query<{ id: number }>(
+    const exists = await getStructureDb().query<{ id: number }>(
       `SELECT id FROM sections WHERE site_key = $1 AND section_key = $2`,
       [input.siteKey, input.sectionKey]
     );
@@ -83,7 +83,7 @@ export async function upsertSection(input: UpsertSectionInput): Promise<UpsertSe
     if (exists.rows.length > 0) {
       // Update existing
       const id = exists.rows[0]!.id;
-      await getDb().query(
+      await getStructureDb().query(
         `UPDATE sections
          SET name              = $1,
              parent_section_id = $2,
@@ -94,12 +94,12 @@ export async function upsertSection(input: UpsertSectionInput): Promise<UpsertSe
       return { sectionId: id };
     } else {
       // Insert new
-      await getDb().query(
+      await getStructureDb().query(
         `INSERT INTO sections (site_key, section_key, parent_section_id, name, last_crawled_at)
          VALUES ($1, $2, $3, $4, datetime('now'))`,
         [input.siteKey, input.sectionKey, input.parentSectionId ?? null, input.name]
       );
-      const r = await getDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
+      const r = await getStructureDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
       return { sectionId: r.rows[0]!.id };
     }
   } catch (e) {

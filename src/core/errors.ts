@@ -60,3 +60,13 @@ export class DatabaseError extends BaseAppError {
     }
   }
 }
+
+export class BoardNotFoundError extends BaseAppError {
+  readonly code = 'BOARD_NOT_FOUND';
+  constructor(message: string) { super(message); }
+}
+
+export class FetchFailedError extends BaseAppError {
+  readonly code = 'FETCH_FAILED';
+  constructor(message: string) { super(message); }
+}

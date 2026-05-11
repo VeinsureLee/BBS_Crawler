@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 /**
@@ -26,7 +26,7 @@ export interface UpsertBoardCrawlStateInput {
 
 export async function getBoardCrawlState(boardId: number): Promise<BoardCrawlState | null> {
   try {
-    const r = await getDb().query<{
+    const r = await getStructureDb().query<{
       board_id: number;
       deepest_page_crawled: number;
       latest_thread_posted_at: string | null;
@@ -55,7 +55,7 @@ export async function getBoardCrawlState(boardId: number): Promise<BoardCrawlSta
 export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): Promise<void> {
   try {
     // Check if crawl state exists
-    const exists = await getDb().query<{
+    const exists = await getStructureDb().query<{
       deepest_page_crawled: number;
       latest_thread_posted_at: string | null;
     }>(
@@ -81,7 +81,7 @@ export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): 
         }
       }
 
-      await getDb().query(
+      await getStructureDb().query(
         `UPDATE board_crawl_state
          SET deepest_page_crawled = $1,
              latest_thread_posted_at = $2,
@@ -98,7 +98,7 @@ export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): 
       );
     } else {
       // Insert new
-      await getDb().query(
+      await getStructureDb().query(
         `INSERT INTO board_crawl_state
            (board_id, deepest_page_crawled, latest_thread_posted_at, last_crawled_at, last_thread_key)
          VALUES ($1, COALESCE($2, 0), $3, $4, $5)`,

@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getContentDb } from './db';
 import { DatabaseError } from '../core/errors';
 import type { Thread, ThreadSummary } from '../core/site-adapter';
 
@@ -22,7 +22,7 @@ export interface FetchSkippedResult {
  */
 export async function checkThreadExists(siteKey: string, url: string): Promise<ThreadExistsResult> {
   try {
-    const r = await getDb().query<{
+    const r = await getContentDb().query<{
       id: number;
       last_fetched_at: string;
       last_reply_at: string | null;
@@ -54,7 +54,7 @@ export async function checkThreadExists(siteKey: string, url: string): Promise<T
  */
 export async function getCrawledThreadUrls(siteKey: string, boardKey?: string): Promise<Set<string>> {
   try {
-    const r = await getDb().query<{ url: string }>(
+    const r = await getContentDb().query<{ url: string }>(
       `SELECT url FROM threads WHERE site_key = $1 ${boardKey ? 'AND board_key = $2' : ''}`,
       boardKey ? [siteKey, boardKey] : [siteKey],
     );
@@ -121,7 +121,7 @@ export async function upsertThread(
 
     if (existing.exists && existing.threadId) {
       // Update existing thread
-      await getDb().query(
+      await getContentDb().query(
         `UPDATE threads
          SET title          = $1,
              author         = COALESCE($2, author),
@@ -150,7 +150,7 @@ export async function upsertThread(
       return { threadId: existing.threadId };
     } else {
       // Insert new thread
-      await getDb().query(
+      await getContentDb().query(
         `INSERT INTO threads
           (site_key, url, title, author, board_key,
            posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at, first_seen_at)
@@ -168,7 +168,7 @@ export async function upsertThread(
         ],
       );
       // Get the last inserted id
-      const r = await getDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
+      const r = await getContentDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
       return { threadId: r.rows[0]!.id };
     }
   } catch (e) {
@@ -203,7 +203,7 @@ export async function upsertThreadSummary(
 
     if (existing.exists && existing.threadId) {
       // Update existing thread
-      await getDb().query(
+      await getContentDb().query(
         `UPDATE threads
          SET title          = $1,
              author         = COALESCE($2, author),
@@ -232,7 +232,7 @@ export async function upsertThreadSummary(
       return { threadId: existing.threadId };
     } else {
       // Insert new thread
-      await getDb().query(
+      await getContentDb().query(
         `INSERT INTO threads
           (site_key, url, title, author, board_key,
            posted_at, last_reply_at, reply_count, view_count, raw, is_pinned, last_fetched_at, first_seen_at)
@@ -250,7 +250,7 @@ export async function upsertThreadSummary(
         ],
       );
       // Get the last inserted id
-      const r = await getDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
+      const r = await getContentDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
       return { threadId: r.rows[0]!.id };
     }
   } catch (e) {

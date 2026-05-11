@@ -1,11 +1,11 @@
-import { getDb } from './db';
+import { getContentDb } from './db';
 import { DatabaseError } from '../core/errors';
 import type { Post } from '../core/site-adapter';
 
 export async function upsertPosts(threadId: number, posts: Post[]): Promise<void> {
   if (posts.length === 0) return;
   try {
-    const db = getDb();
+    const db = getContentDb();
     await db.transaction(async (tx) => {
       for (const p of posts) {
         // Check if post exists

@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 export interface SiteRow {
@@ -10,14 +10,14 @@ export interface SiteRow {
 export async function upsertSite(row: SiteRow): Promise<void> {
   try {
     // Check if site exists
-    const exists = await getDb().query(
+    const exists = await getStructureDb().query(
       `SELECT site_key FROM sites WHERE site_key = $1`,
       [row.siteKey]
     );
 
     if (exists.rows.length > 0) {
       // Update
-      await getDb().query(
+      await getStructureDb().query(
         `UPDATE sites
          SET display_name = $1,
              base_url     = $2
@@ -26,7 +26,7 @@ export async function upsertSite(row: SiteRow): Promise<void> {
       );
     } else {
       // Insert
-      await getDb().query(
+      await getStructureDb().query(
         `INSERT INTO sites (site_key, display_name, base_url, created_at)
          VALUES ($1, $2, $3, datetime('now'))`,
         [row.siteKey, row.displayName, row.baseUrl],

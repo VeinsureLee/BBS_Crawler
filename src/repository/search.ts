@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getContentDb } from './db';
 import { DatabaseError } from '../core/errors';
 
 export interface SearchCacheParams {
@@ -29,7 +29,7 @@ const SEARCH_SQL = `
 export async function searchCache(params: SearchCacheParams): Promise<SearchCacheRow[]> {
   const limit = params.limit ?? 50;
   try {
-    const r = await getDb().query<SearchCacheRow>(
+    const r = await getContentDb().query<SearchCacheRow>(
       SEARCH_SQL,
       [params.siteKey ?? null, params.keyword, limit],
     );

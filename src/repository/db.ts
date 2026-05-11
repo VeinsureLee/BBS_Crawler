@@ -1,9 +1,9 @@
 /**
  * Database access layer.
  *
- * Backed by SQLite (via better-sqlite3) — a fast, embedded SQL database that
- * stores its data in a single file or in-memory. Zero external services, zero
- * install for end users beyond `npm install`.
+ * Two separate SQLite databases:
+ *  - structure.db: sites, sections, boards, board_crawl_state
+ *  - content.db: threads, posts, fetch_log
  */
 import Database from 'better-sqlite3';
 import fs from 'fs';
@@ -36,13 +36,13 @@ export interface Db {
 class SQLiteDb implements Db {
   private db: Database.Database;
 
-  constructor(dataDir: string) {
+  constructor(dataDir: string, dbName: string) {
     // Ensure directory exists
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
-    const dbPath = path.join(dataDir, 'bbs-crawler.db');
+    const dbPath = path.join(dataDir, dbName);
     this.db = new Database(dbPath);
     // Enable WAL mode for better concurrency
     this.db.pragma('journal_mode = WAL');
@@ -125,27 +125,82 @@ class SQLiteDb implements Db {
   }
 }
 
-let db: Db | null = null;
-
-export function initDb(dataDir: string): Db {
-  if (db) return db;
-  db = new SQLiteDb(dataDir);
-  return db;
+export interface DbConfig {
+  dataDir: string;
 }
 
-export function getDb(): Db {
-  if (!db) throw new DatabaseError('initDb has not been called');
-  return db;
+export interface Dbs {
+  structureDb: Db;
+  contentDb: Db;
 }
 
-export async function closeDb(): Promise<void> {
-  if (db) {
-    await db.close();
-    db = null;
+let structureDbInstance: Db | null = null;
+let contentDbInstance: Db | null = null;
+
+/**
+ * Initialize both structure and content databases.
+ */
+export function initDbs(config: DbConfig): Dbs {
+  if (!structureDbInstance) {
+    structureDbInstance = new SQLiteDb(config.dataDir, 'structure.db');
+  }
+  if (!contentDbInstance) {
+    contentDbInstance = new SQLiteDb(config.dataDir, 'content.db');
+  }
+  return {
+    structureDb: structureDbInstance,
+    contentDb: contentDbInstance,
+  };
+}
+
+/**
+ * Get structure database (must call initDbs first).
+ */
+export function getStructureDb(): Db {
+  if (!structureDbInstance) {
+    throw new DatabaseError('initDbs has not been called');
+  }
+  return structureDbInstance;
+}
+
+/**
+ * Get content database (must call initDbs first).
+ */
+export function getContentDb(): Db {
+  if (!contentDbInstance) {
+    throw new DatabaseError('initDbs has not been called');
+  }
+  return contentDbInstance;
+}
+
+/**
+ * Close both databases.
+ */
+export async function closeDbs(): Promise<void> {
+  if (structureDbInstance) {
+    await structureDbInstance.close();
+    structureDbInstance = null;
+  }
+  if (contentDbInstance) {
+    await contentDbInstance.close();
+    contentDbInstance = null;
   }
 }
 
-/** Inject a Db implementation directly. Used by tests. */
-export function _setDbForTests(d: Db | null): void {
-  db = d;
+// --- Deprecated API for backward compatibility ---
+
+/** @deprecated Use initDbs instead */
+export function initDb(dataDir: string): Db {
+  initDbs({ dataDir });
+  return getStructureDb();
+}
+
+/** @deprecated Use getStructureDb or getContentDb instead */
+export function getDb(): Db {
+  return getStructureDb();
+}
+
+/** @deprecated Use closeDbs instead */
+export async function closeDb(): Promise<void> {
+  await closeDbs();
 }

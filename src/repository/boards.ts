@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 import type { BoardStats } from '../core/site-adapter';
 
@@ -25,7 +25,7 @@ export interface BoardRow {
  */
 export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> {
   try {
-    const r = await getDb().query<{ id: number; board_key: string; name: string | null }>(
+    const r = await getStructureDb().query<{ id: number; board_key: string; name: string | null }>(
       `SELECT b.id, b.board_key, b.name
          FROM boards b
          LEFT JOIN threads t
@@ -50,7 +50,7 @@ export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> 
 
 export async function listBoards(siteKey: string): Promise<BoardRow[]> {
   try {
-    const r = await getDb().query<{ id: number; board_key: string; name: string | null }>(
+    const r = await getStructureDb().query<{ id: number; board_key: string; name: string | null }>(
       `SELECT id, board_key, name FROM boards WHERE site_key = $1 ORDER BY id`,
       [siteKey],
     );
@@ -67,7 +67,7 @@ export async function listBoards(siteKey: string): Promise<BoardRow[]> {
 export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardResult> {
   try {
     // Check if board exists
-    const exists = await getDb().query<{ id: number }>(
+    const exists = await getStructureDb().query<{ id: number }>(
       `SELECT id FROM boards WHERE site_key = $1 AND board_key = $2`,
       [input.siteKey, input.boardKey]
     );
@@ -75,7 +75,7 @@ export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardR
     if (exists.rows.length > 0) {
       // Update existing
       const id = exists.rows[0]!.id;
-      await getDb().query(
+      await getStructureDb().query(
         `UPDATE boards
          SET name            = $1,
              section_id      = $2,
@@ -94,7 +94,7 @@ export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardR
       return { boardId: id };
     } else {
       // Insert new
-      await getDb().query(
+      await getStructureDb().query(
         `INSERT INTO boards
           (site_key, board_key, name, section_id, moderators, stats, last_crawled_at)
          VALUES ($1, $2, $3, $4, $5, $6, datetime('now'))`,
@@ -107,7 +107,7 @@ export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardR
           input.stats ? JSON.stringify(input.stats) : null,
         ],
       );
-      const r = await getDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
+      const r = await getStructureDb().query<{ id: number }>(`SELECT last_insert_rowid() as id`);
       return { boardId: r.rows[0]!.id };
     }
   } catch (e) {

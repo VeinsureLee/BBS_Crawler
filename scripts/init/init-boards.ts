@@ -1,11 +1,9 @@
 /**
  * Init step 2: for every top-level section already in DB, crawl its page to
- * discover sub-sections (二级目录) and boards. Boards are persisted with their
- * moderators and stats; sub-sections are persisted under their parent and then
- * crawled once more to gather the boards inside.
+ * discover sub-sections (any depth) and boards recursively.
  *
  * Usage:
- *   npx tsx scripts/init-boards.ts [siteKey]
+ *   npx tsx scripts/init/init-boards.ts [siteKey]
  *
  * Defaults to siteKey="school-bbs". Requires:
  *   - Top-level sections already populated by scripts/init-sections.ts
@@ -18,7 +16,7 @@ import * as path from 'path';
 import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteConfig } from '../../src/core/site-config';
-import { initDb, closeDb } from '../../src/repository/db';
+import { initDbs, closeDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { listTopLevelSections, upsertSection } from '../../src/repository/sections';
 import { upsertBoard } from '../../src/repository/boards';
@@ -27,14 +25,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function crawlSection(
+async function crawlSectionRecursive(
   page: Page,
   adapter: ReturnType<typeof getAdapter>,
   siteKey: string,
   parentSectionId: number,
   parentSectionKey: string,
   requestIntervalMs: number,
+  depth: number = 0,
 ): Promise<{ boards: number; subSections: number }> {
+  const indent = '  '.repeat(depth);
   const children = await adapter.listSectionChildren!(page, parentSectionKey);
   let boardCount = 0;
   let subCount = 0;
@@ -59,28 +59,14 @@ async function crawlSection(
       parentSectionId,
     });
     subCount++;
-    console.log(`    [sub] ${sub.sectionKey}  ${sub.name}  -> id=${sectionId}`);
+    console.log(`${indent}[sub] ${sub.sectionKey}  ${sub.name}  -> id=${sectionId}`);
 
     await sleep(requestIntervalMs);
-    const nested = await adapter.listSectionChildren!(page, sub.sectionKey);
-    for (const b of nested.boards) {
-      await upsertBoard({
-        siteKey,
-        boardKey: b.boardKey,
-        name: b.name,
-        sectionId,
-        moderators: b.moderators,
-        stats: b.stats,
-      });
-      boardCount++;
-    }
-    if (nested.subSections.length > 0) {
-      console.warn(
-        `    WARN: nested sub-sections inside ${sub.sectionKey} not crawled (depth>2): ${nested.subSections
-          .map((s) => s.sectionKey)
-          .join(', ')}`,
-      );
-    }
+    const childResult = await crawlSectionRecursive(
+      page, adapter, siteKey, sectionId, sub.sectionKey, requestIntervalMs, depth + 1
+    );
+    boardCount += childResult.boards;
+    subCount += childResult.subSections;
   }
 
   return { boards: boardCount, subSections: subCount };
@@ -90,7 +76,7 @@ async function main() {
   const siteKey = process.argv[2] ?? 'school-bbs';
   const cfg = parseConfig(process.env);
   const siteConfig = loadSiteConfig(siteKey);
-  initDb(cfg.dataDir);
+  initDbs({ dataDir: cfg.dataDir });
 
   const requestIntervalMs = siteConfig.crawl.structureRequestIntervalMs;
 
@@ -126,26 +112,27 @@ async function main() {
   try {
     for (const sec of sections) {
       console.log(`Section [${sec.id}] ${sec.sectionKey}  ${sec.name ?? ''}`);
-      const { boards, subSections } = await crawlSection(
+      const { boards, subSections } = await crawlSectionRecursive(
         page,
         adapter,
         siteKey,
         sec.id,
         sec.sectionKey,
         requestIntervalMs,
+        1,
       );
-      console.log(`  -> ${boards} boards, ${subSections} sub-sections`);
+      console.log(`  -> ${boards} boards, ${subSections} sub-sections in this branch`);
       totalBoards += boards;
       totalSubs += subSections;
       await sleep(requestIntervalMs);
     }
     console.log(
-      `Done. ${sections.length} top-level sections, ${totalSubs} sub-sections, ${totalBoards} boards persisted.`,
+      `Done. ${sections.length} top-level sections, ${totalSubs} total sub-sections, ${totalBoards} boards persisted.`,
     );
   } finally {
     await ctx.close();
     await browser.close();
-    await closeDb();
+    await closeDbs();
   }
 }
 
