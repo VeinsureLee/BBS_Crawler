@@ -15,6 +15,7 @@ import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadSiteConfig, buildRouteUrl } from '../../src/core/site-config';
+import { logger } from '../../src/util/logger';
 
 const config = loadSiteConfig('school-bbs');
 const ui = config.selectors;
@@ -74,7 +75,7 @@ async function main() {
     }
     const target = buildRouteUrl(baseUrl, config.routes.section, { key: sectionKey });
 
-    console.log(`Navigating to section page...`);
+    logger.info({ target }, '导航到讨论区页面');
     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     // Wait for the SPA to inject the board rows before snapshotting.
@@ -107,10 +108,7 @@ async function main() {
       'utf-8',
     );
 
-    console.log(`Saved HTML  -> ${htmlPath}`);
-    console.log(`Saved meta  -> ${metaPath}`);
-    console.log(`Final URL: ${finalUrl}`);
-    console.log(`Title:     ${title}`);
+    logger.info({ htmlPath, metaPath, finalUrl, title }, `已保存：${htmlPath}`);
   } finally {
     await ctx.close();
     await browser.close();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactString, addRedactedSecret, _resetForTests } from '../../../src/util/logger';
+import { redactString, addRedactedSecret, _resetForTests, appLogPath } from '../../../src/util/logger';
 
 describe('redactString', () => {
   it('replaces every registered secret with ***', () => {
@@ -26,5 +26,22 @@ describe('redactString', () => {
     _resetForTests();
     addRedactedSecret('a.b*c');
     expect(redactString('value=a.b*c!')).toBe('value=***!');
+  });
+});
+
+describe('appLogPath', () => {
+  it('returns a date-stamped path under <logDir>/app/', () => {
+    const p = appLogPath('/tmp/test-logs');
+    const today = new Date().toISOString().slice(0, 10);
+    // path.join normalizes separators per-OS; assert components instead of exact string.
+    expect(p).toContain('app');
+    expect(p).toContain(`app-${today}.log`);
+    expect(p).toContain('test-logs');
+  });
+
+  it('defaults to ./.logs when no dir given', () => {
+    const p = appLogPath();
+    expect(p).toContain('.logs');
+    expect(p).toContain('app');
   });
 });

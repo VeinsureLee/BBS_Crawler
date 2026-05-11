@@ -20,6 +20,7 @@ import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadSiteConfig, buildRouteUrl } from '../../src/core/site-config';
+import { logger } from '../../src/util/logger';
 
 const SITE = 'school-bbs';
 const config = loadSiteConfig(SITE);
@@ -64,7 +65,7 @@ async function main() {
 
   try {
     const boardUrl = buildRouteUrl(baseUrl, config.routes.board, { key: boardKey });
-    console.log(`[board] ${boardUrl}`);
+    logger.info({ boardKey, boardUrl }, `[board] ${boardUrl}`);
     await page.goto(boardUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForSelector(config.selectors.board.threadRowReady, { timeout: 15000 });
     await page.waitForTimeout(500);
@@ -90,9 +91,9 @@ async function main() {
       return out;
     });
 
-    console.log(`[board] ${boardKey}: ${pinned.length} pinned thread(s)`);
+    logger.info({ boardKey, count: pinned.length }, `[board] ${boardKey}: ${pinned.length} 个置顶`);
     if (pinned.length === 0) {
-      console.log(`No pinned threads on ${boardKey}. Nothing saved.`);
+      logger.info({ boardKey }, `${boardKey} 无置顶，跳过`);
       return;
     }
 
@@ -106,8 +107,7 @@ async function main() {
         boardKey,
         threadId: articleId,
       });
-      console.log(`  -> [${articleId}] ${p.title}`);
-      console.log(`     ${target}`);
+      logger.info({ articleId, title: p.title, target }, `[${articleId}] ${p.title}`);
       // Force a full reload between hash routes — otherwise Playwright's
       // hash-only navigation doesn't trigger the SPA to re-render.
       await page.goto('about:blank');
@@ -121,7 +121,7 @@ async function main() {
           { timeout: 15000 },
         );
       } catch {
-        console.warn('     (article view not detected, saving whatever rendered)');
+        logger.warn({ articleId, target }, '帖子视图未检测到，仍保存当前已渲染内容');
       }
       await page.waitForTimeout(800);
 
@@ -154,8 +154,10 @@ async function main() {
       'utf-8',
     );
 
-    console.log(`\nSaved ${indexEntries.length} pinned thread(s) under ${PINNED_DIR}`);
-    console.log(`Index: ${indexPath}`);
+    logger.info(
+      { count: indexEntries.length, dir: PINNED_DIR, indexPath },
+      `已保存 ${indexEntries.length} 个置顶帖至 ${PINNED_DIR}`,
+    );
   } finally {
     await ctx.close();
     await browser.close();

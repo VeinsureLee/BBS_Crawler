@@ -3,6 +3,7 @@ import { chromium, BrowserContext, Page, Browser } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { logger } from '../../src/util/logger';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -80,7 +81,7 @@ async function createContext(): Promise<{ browser: Browser, ctx: BrowserContext,
 
 // 步骤1: 获取所有讨论区
 async function crawlSections(page: Page, baseUrl: string): Promise<Section[]> {
-  console.log('Crawling sections...');
+  logger.info({}, '步骤 1：抓取讨论区清单');
 
   await page.goto(baseUrl, { waitUntil: 'networkidle' });
 
@@ -112,7 +113,7 @@ async function crawlSections(page: Page, baseUrl: string): Promise<Section[]> {
   saveJson(path.join(FORUM_DIR, 'sections.json'), sections);
   saveHtml(path.join(FORUM_DIR, 'homepage-for-analysis.html'), await page.content());
 
-  console.log(`Found ${sections.length} sections`);
+  logger.info({ count: sections.length }, `发现 ${sections.length} 个讨论区`);
   return sections;
 }
 
@@ -134,7 +135,7 @@ function normalizeBoardKey(href: string, baseUrl: string): string {
 
 // 步骤2: 爬取单个讨论区的版面
 async function crawlSectionBoards(page: Page, baseUrl: string, section: Section): Promise<Board[]> {
-  console.log(`Crawling boards for section: ${section.sectionKey}`);
+  logger.info({ sectionKey: section.sectionKey }, `步骤 2：抓取讨论区 ${section.sectionKey} 的版面`);
 
   const sectionUrl = baseUrl + section.sectionKey;
   await page.goto(sectionUrl, { waitUntil: 'networkidle' });
@@ -168,13 +169,13 @@ async function crawlSectionBoards(page: Page, baseUrl: string, section: Section)
   const sectionFileName = section.sectionKey.replace(/\//g, '_');
   saveHtml(path.join(BOARD_DIR, `${sectionFileName}.html`), await page.content());
 
-  console.log(`Found ${boards.length} boards in ${section.sectionKey}`);
+  logger.info({ sectionKey: section.sectionKey, count: boards.length }, `${section.sectionKey} 下发现 ${boards.length} 个版面`);
   return boards;
 }
 
 // 步骤3: 爬取单个版面的置顶帖子
 async function crawlBoardPinned(page: Page, baseUrl: string, board: Board): Promise<PinnedThread[]> {
-  console.log(`Crawling pinned threads for board: ${board.boardKey}`);
+  logger.info({ boardKey: board.boardKey }, `步骤 3：抓取版面 ${board.boardKey} 的置顶帖`);
 
   const boardUrl = baseUrl + board.boardKey;
   await page.goto(boardUrl, { waitUntil: 'networkidle' });
@@ -230,7 +231,7 @@ async function crawlBoardPinned(page: Page, baseUrl: string, board: Board): Prom
     saveJson(path.join(PINNED_DIR, `${boardFileName}.json`), pinnedThreads);
   }
 
-  console.log(`Found ${pinnedThreads.length} threads in ${board.boardKey}`);
+  logger.info({ boardKey: board.boardKey, count: pinnedThreads.length }, `${board.boardKey} 下发现 ${pinnedThreads.length} 个帖子`);
   return pinnedThreads;
 }
 
@@ -269,8 +270,10 @@ async function main() {
     }
     saveJson(path.join(FORUM_DIR, 'threads.json'), allThreads);
 
-    console.log('Done!');
-    console.log(`Total: ${sections.length} sections, ${allBoards.length} boards, ${allThreads.length} threads`);
+    logger.info(
+      { sections: sections.length, boards: allBoards.length, threads: allThreads.length },
+      `完成：${sections.length} 个讨论区, ${allBoards.length} 个版面, ${allThreads.length} 个帖子`,
+    );
 
   } finally {
     await ctx.close();

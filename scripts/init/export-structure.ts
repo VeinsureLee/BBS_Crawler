@@ -12,6 +12,7 @@ import * as path from 'path';
 import { parseConfig } from '../../src/core/config';
 import { initDbs, closeDbs } from '../../src/repository/db';
 import { exportForumStructure } from '../../src/export/exporter';
+import { logger } from '../../src/util/logger';
 
 async function main() {
   const siteKey = process.argv[2] ?? 'school-bbs';
@@ -22,7 +23,7 @@ async function main() {
 
   try {
     await exportForumStructure(siteKey, outputPath);
-    console.log(`Forum structure exported to ${outputPath}`);
+    logger.info({ siteKey, outputPath }, `论坛结构已导出至 ${outputPath}`);
   } finally {
     await closeDbs();
   }

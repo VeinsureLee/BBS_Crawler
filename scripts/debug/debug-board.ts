@@ -118,12 +118,12 @@ async function main() {
 
   const browser = await chromium.launch({
     headless: false, // 有头模式看发生了什么
-    executablePath: appCfg.browserExecutablePath,
     slowMo: 100, // 稍微慢一点，方便观察
+    ...(appCfg.browserExecutablePath ? { executablePath: appCfg.browserExecutablePath } : {}),
   });
   const ctx = await browser.newContext({
     storageState: statePath,
-    userAgent: appCfg.browserUserAgent,
+    ...(appCfg.browserUserAgent ? { userAgent: appCfg.browserUserAgent } : {}),
   });
   const page = await ctx.newPage();
 
