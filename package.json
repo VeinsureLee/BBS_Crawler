@@ -27,11 +27,7 @@
     "init:export": "tsx scripts/init/export-structure.ts",
 
     "db:check": "tsx scripts/db/check-db.ts",
-    "db:migrate:up": "tsx scripts/db/migrate.ts up",
-    "db:migrate:down": "tsx scripts/db/migrate.ts down",
-    "db:migrate:status": "tsx scripts/db/migrate.ts status",
-    "db:delete-pinned": "tsx scripts/db/delete-pinned.ts",
-    "db:peek": "tsx scripts/db/peek-posts.ts",
+    "db:migrate:layered": "tsx scripts/db/migrate-to-layered.ts",
 
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
@@ -40,8 +36,6 @@
 
     "debug:board": "tsx scripts/debug/debug-board.ts",
     "debug:failed-boards": "tsx scripts/debug/explore-failed-boards.ts",
-    "debug:find-thread": "tsx scripts/debug/find-thread.ts",
-    "debug:inspect": "tsx scripts/debug/inspect-forum.ts",
 
     "explore": "tsx scripts/util/explore.ts",
     "format:html": "tsx scripts/util/format-html.ts"
