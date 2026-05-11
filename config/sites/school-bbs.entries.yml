@@ -1,0 +1,29 @@
+# 顶级讨论区清单 — Phase 2 配置外置的核心文件。
+#
+# 本项目初始化时（`npm run init:sections`），会优先读这个文件，把里面列的
+# `forums` 逐条 upsert 到 structure 数据库。只有当本文件 **不存在** 或
+# `forums` 数组为空时，才回退到 adapter.listSections() —— 即去爬论坛首页。
+#
+# 工作流：
+#   1. 第一次部署时，可以先把本文件清空（或删除），让 init 走"爬首页"路径。
+#   2. 跑完一次 init:sections 后，从数据库 sections 表里抄一份清单，
+#      手工填到下面的 `forums:` 列表里。
+#   3. 之后再跑 init:sections 就走配置驱动 —— 论坛改首页结构也不影响。
+#
+# 每条 entry 字段：
+#   sectionKey  论坛 URL 里 /section/{key} 的 {key}，必须唯一
+#   name        给人看的中文名
+#   nodeType    可选，引用 node-types.yml 里的某个 key；默认 "forum"
+#
+# 添加新讨论区只改本文件 + 重跑 init:sections。
+
+siteKey: school-bbs
+
+forums: []
+  # 示例（手工取消注释并替换为实际清单）：
+  # - sectionKey: ten
+  #   name: 本站十大
+  # - sectionKey: school
+  #   name: 校园生活
+  # - sectionKey: club
+  #   name: 社团

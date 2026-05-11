@@ -1,0 +1,27 @@
+# 节点形态声明 —— 描述本站点的"层级关系"，校验用。
+#
+# 本文件目前只做声明 + 校验：
+#   1. entries.yml 里每条 entry 的 nodeType 必须出现在这里；
+#   2. 每个 nodeType 的 childTypes 也必须是这里声明过的 key（或空数组）。
+#
+# 它不直接驱动解析逻辑 —— 解析仍然在 adapter 代码里。Phase 3 数据库分层
+# 落地后，可能会用 nodeType 字段决定一个节点存到哪个 .db 文件。
+
+siteKey: school-bbs
+
+nodeTypes:
+  forum:
+    description: 顶级讨论区（数据库 type='forum'，每个对应一个独立 .db 文件）
+    childTypes: [sub_forum, board]
+
+  sub_forum:
+    description: 二级 / 三级讨论区，本身不存帖，只是组织结构
+    childTypes: [board, sub_forum]
+
+  board:
+    description: 版面（叶子节点的容器），底下是帖子
+    childTypes: [thread]
+
+  thread:
+    description: 帖子，最末梢，包含若干楼层
+    childTypes: []

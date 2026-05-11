@@ -22,19 +22,24 @@ import {
 } from '../repository/boards';
 import { upsertThread } from '../repository/threads';
 import { upsertPosts } from '../repository/posts';
-import { loadSiteConfig } from './site-config';
+import { loadSiteConfig, loadSiteEntries, validateConfigConsistency } from './site-config';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
- * Crawl top-level sections from the homepage and persist. Idempotent — uses
- * upsert. Also ensures the `sites` row exists.
+ * Persist top-level sections. Idempotent — uses upsert.
+ *
+ * Source priority:
+ *   1. config/sites/<siteKey>.entries.yml (when present + non-empty)
+ *   2. adapter.listSections(page) — crawl the homepage (legacy fallback)
+ *
+ * The config-driven path is preferred because it decouples init from the
+ * forum's homepage layout; the homepage can change without breaking init.
  */
 export async function runInitSections(page: Page, siteKey: string): Promise<void> {
   const adapter = getAdapter(siteKey);
-  if (!adapter.listSections) throw new Error(`Adapter ${siteKey} has no listSections`);
 
   await upsertSite({
     siteKey: adapter.siteKey,
@@ -42,11 +47,38 @@ export async function runInitSections(page: Page, siteKey: string): Promise<void
     baseUrl: adapter.baseUrl,
   });
 
+  validateConfigConsistency(siteKey);
+  const entries = loadSiteEntries(siteKey);
+
+  if (entries && entries.forums.length > 0) {
+    for (const f of entries.forums) {
+      await upsertSection({ siteKey, sectionKey: f.sectionKey, name: f.name });
+    }
+    logger.info(
+      { siteKey, count: entries.forums.length, source: 'entries.yml' },
+      `init: 入库 ${entries.forums.length} 个顶级讨论区（来源：entries.yml）`,
+    );
+    return;
+  }
+
+  if (!adapter.listSections) {
+    throw new Error(
+      `Adapter "${siteKey}" has no listSections and entries.yml is missing/empty`,
+    );
+  }
+
+  logger.warn(
+    { siteKey, source: 'adapter.listSections' },
+    'entries.yml 缺失或为空，回退到 adapter.listSections 爬首页',
+  );
   const sections = await adapter.listSections(page);
   for (const s of sections) {
     await upsertSection({ siteKey, sectionKey: s.sectionKey, name: s.name });
   }
-  logger.info({ siteKey, count: sections.length }, 'init: persisted top-level sections');
+  logger.info(
+    { siteKey, count: sections.length, source: 'adapter' },
+    `init: 入库 ${sections.length} 个顶级讨论区（来源：adapter）`,
+  );
 }
 
 /**
@@ -124,8 +156,8 @@ export async function runInitPinned(
           url, maxPages: cfg.crawl.maxPinnedThreadPages,
         });
         thread.raw = { ...(thread.raw ?? {}), pinned: true };
-        const { threadId } = await upsertThread(siteKey, thread, { isPinned: true });
-        await upsertPosts(threadId, thread.posts);
+        const { threadId, forumDb } = await upsertThread(siteKey, thread, { isPinned: true });
+        await upsertPosts(forumDb, threadId, thread.posts);
       } catch (e) {
         logger.warn({ siteKey, board: board.boardKey, articleId, err: String(e) }, 'init: pinned thread fetch failed; skipping');
       }
