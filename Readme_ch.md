@@ -1,36 +1,45 @@
 # BBS_Crawler
 
-基于 Playwright 的 MCP 服务，爬取论坛帖子并落库到本地 SQLite。作为 **BBS Agent of BYR** 项目的数据摄取层。
+基于 Playwright 的论坛爬虫，把帖子持久化到分层 SQLite 存储，并提供 TypeScript 库给下游使用。**BBS Agent of BYR** 项目的数据摄取层。
 
-> 状态：**稳定可用，生产就绪**——完整 `school-bbs` 生命周期实现，4 个 MCP tool 工作正常，所有 smoke test 已通过。English version: [`README.md`](README.md)。
+> 状态：**Phase 3 落地**——分层式 per-forum SQLite 存储、配置驱动初始化、节点递归树、init 流水线加固。`school-bbs` 适配器完成。English version: [`README.md`](README.md)。
+
+> 本项目**不是 MCP 服务**——它是 TypeScript 库 + CLI 脚本。MCP 服务由下游独立项目实现，把本项目作为依赖引入。完整设计思路见 [`.shadow/README.md`](.shadow/README.md)。
 
 ## 它做什么
 
-- 暴露 4 个高层 MCP tool（`forum_list_sites` / `forum_list_threads` / `forum_get_thread` / `forum_session_status`），供自定义 agent 按需爬取论坛内容。
-- 通过 Playwright 驱动真实 Chromium 浏览器，拿到登录后才可见的页面。
-- 用 Playwright 的 `storageState` 持久化登录会话——agent 不需要每次都重新提交账密。
-- 可选的本地加密凭据缓存（AES-256-GCM）：cookie 失效时不强迫用户手动重登（前提是登录时选择了"记住密码"）。
-- 爬到的内容**总是**写入嵌入式 SQLite。`threads` 单表通过 `is_pinned` 字段区分初始化时抓的置顶帖与按需爬的日常帖；`board_crawl_state` 记录每个版面的爬取进度，支持 agent 增量只拉新帖。
-- 下游查询 / RAG / embedding 由独立的 [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) 项目负责——本 MCP 只爬取与持久化。
-- 站点适配器可插拔：内置 `school-bbs` 适配器；新站点只需在 `src/adapters/<site>/` 下加一个文件。
+- 通过 Playwright Chromium 爬取论坛内容（讨论区 / 版面 / 置顶帖 / 普通帖 / 楼层）
+- 把数据持久化到**分层 SQLite**：一个全局 `structure.db` 装节点递归树，每个顶级讨论区单独一个 `forums/<key>.db`
+- 第一次打开数据库文件时自动应用 schema —— 全新部署不需要单独的 migration 框架
+- 站点适配器可插拔：内置 `school-bbs`，新站点只需在 `src/adapters/<site>/` 下加一个文件夹 + 一份 YAML 配置
+- **配置驱动初始化**：顶级讨论区清单和节点形态写在 `config/sites/<siteKey>.entries.yml` 和 `<siteKey>.node-types.yml` 里 —— 论坛首页 HTML 不再是真理来源
+- 登录流程用 `storageState` 持久化 + 可选加密凭据缓存（AES-256-GCM），cookie 失效不强迫手动重登
+- 每版面增量爬取进度（`board_crawl_state.last_thread_posted_at` 水位线），下游只取增量
+- pino multistream 结构化日志（stdout + 按日切割的 `.logs/app/app-<date>.log`）
 
-## 在生态里的位置
+## 它不做什么
+
+- **不是 MCP 服务** —— 那是下游项目的事
+- 不做全文搜索 —— `search.ts` 已删除，下游 RAG / 搜索项目负责
+- 不暴露浏览器底层工具
+
+## 在生态中的位置
 
 | 仓库 | 职责 |
 |---|---|
-| [`BBS_Crawler`](https://github.com/VeinsureLee/BBS_Crawler)（本仓库） | 浏览器爬虫 + MCP 服务，写 SQLite |
-| [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) | 存储栈：SQLite（原文）+ Chroma（向量）+ Neo4j（关系） |
-| [`BBS_Agent`](https://github.com/VeinsureLee/BBS_Agent) | 多索引 RAG agent，消费本 MCP 并查询数据库 |
+| **`BBS_Crawler`（本仓库）** | 浏览器爬虫 + 分层 SQLite 存储 + TS 库 |
+| `BBS_Database` | 存储栈：SQLite（原文）+ Chroma（向量）+ Neo4j（关系） |
+| `BBS_Agent` | 多索引 RAG agent，消费 MCP 层（独立仓库） |
 
-本爬虫**拥有**论坛内容的 SQLite schema。`BBS_Database` 读同一个 SQLite，下游做 embedding / 图索引。
+本爬虫**拥有**分层 SQLite schema。下游消费方读取同一批文件（只读）做 embedding / 图索引。
 
 ## 技术栈
 
 - TypeScript（Node 20+）
-- [Playwright](https://playwright.dev/)（仅 chromium）
-- [SQLite](https://pglite.dev/)（嵌入式 SQLite，无需外部数据库）
-- [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk)（stdio 传输）
-- `zod` 做 env / 入参校验，`pino` 做结构化日志
+- [Playwright](https://playwright.dev/)（仅 Chromium）
+- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3)（同步嵌入式 SQLite，WAL 模式）
+- [js-yaml](https://github.com/nodeca/js-yaml) + [zod](https://zod.dev/) 做配置加载和校验
+- [pino](https://getpino.io/) 做结构化日志（stdout + 文件 sink）
 
 ## 快速开始
 
@@ -39,230 +48,234 @@
 npm install
 npx playwright install chromium
 
-# 2. 配置环境
+# 2. 配置环境变量
 cp .env.example .env
-# 填入 SCHOOL_BBS_USERNAME、SCHOOL_BBS_PASSWORD、SCHOOL_BBS_BASE_URL
-# （PGDATA_DIR 可选，默认 ./.pgdata）
+# 填入 SCHOOL_BBS_USERNAME / SCHOOL_BBS_PASSWORD / SCHOOL_BBS_BASE_URL
+# DATABASE_PATH 默认 ./.data
 
 # 3. 首次登录（保存 storageState；询问是否记住密码）
-npm run login school-bbs
+npm run login
 
-# 4. 初始化论坛结构（一次性）
-npm run init:sections school-bbs
-npm run init:boards school-bbs
-npm run init:pinned school-bbs
+# 4. 初始化论坛结构
+npm run init:sections          # 顶级讨论区（先读 entries.yml，缺失则爬首页）
+npm run init:boards            # 子讨论区 + 版面
+npm run init:pinned -- --concurrency 8       # 用 8 比默认 16 更稳，避免 chrome 爆内存
 
-# 5. 启动 MCP 服务（stdio）
-# 日常使用推荐 `npm run dev`（用 tsx）；`npm run start`（node dist）需要先 build
-npm run dev
-
-# 可选：运行完整 end-to-end smoke test 验证一切正常
-npx tsx scripts/debug/smoke-mcp.ts
+# 5. 另开一个窗口看实时进度（可选）
+Get-Content .logs/app/app-*.log -Wait -Tail 0 |
+  Select-String '"stage":"progress' |
+  ForEach-Object { ($_ | ConvertFrom-Json).msg }
 ```
 
-登录脚本会问 `Remember password? (y/N)`：
-- 选 `y` → 凭据用 AES-256-GCM 加密写到 `./.state/<siteKey>.credentials.enc`（mode 0600）。之后 cookie 失效时，auth manager 会自动用缓存凭据重登，agent 完全感知不到 `SESSION_EXPIRED`。
-- 选 `N` → 仅 cookie 模式，会话失效时手动再跑一次 `npm run login`。
+第 4 步跑完，数据目录长这样：
 
-接入 Claude Code / Claude Desktop / 自定义 agent 时，把它作为 stdio MCP 服务注册即可。`claude_desktop_config.json` 配置片段示例：
-
-```json
-{
-  "mcpServers": {
-    "bbs-crawler": {
-      "command": "node",
-      "args": ["d:/MyProject/Python_Project/BBS_Crawler/dist/index.js"],
-      "env": {
-        "SCHOOL_BBS_USERNAME": "...",
-        "SCHOOL_BBS_PASSWORD": "...",
-        "SCHOOL_BBS_BASE_URL": "..."
-      }
-    }
-  }
-}
+```
+.data/
+  structure.db              sites + nodes（递归树）+ fetch_log
+  forums/
+    本站站务.db                threads + posts + board_crawl_state + daily_traffic
+    校园生活.db
+    学术科技.db
+    ...
 ```
 
-## MCP tool 列表
+`npm run login` 会问 `Remember password? (y/N)`：
+- 选 `y` → 凭据用 AES-256-GCM 加密写到 `./.state/<siteKey>.credentials.enc`（mode 0600）。之后 cookie 失效时，AuthManager 用缓存自动重登
+- 选 `N` → 仅 cookie 模式，会话失效时手动再跑一次 `npm run login`
 
-| Tool | 用途 |
+## 库 API
+
+本项目作为 TypeScript 库被消费。公开接口在 [`src/index.ts`](src/index.ts)：
+
+| 分组 | 导出 |
 |---|---|
-| `forum_list_sites` | 查询已注册的站点适配器 |
-| `forum_list_threads` | 按版面**精确名称**爬取帖子（增量或翻页两种模式） |
-| `forum_get_thread` | 取单帖完整内容（含全部楼层） |
-| `forum_session_status` | 查看某站点的登录状态 |
+| **数据库** | `initDb`, `getStructureDb`, `getForumDb`, `closeAllDbs`, `STRUCTURE_SCHEMA`, `FORUM_SCHEMA` |
+| **站点 / 节点** | `upsertSite`, `upsertSection`, `hasSections`, `listTopLevelSections`, `sectionsMissingBoards` |
+| **版面** | `upsertBoard`, `listBoards`, `boardsMissingPinned`, `findBoardByName`, `getBoardById`, `resolveBoardRoute`, `findForumDbFileForBoard` |
+| **帖子 / 楼层** | `upsertThread`, `upsertThreadSummary`, `upsertPosts`, `checkThreadExists`, `getCrawledThreadUrls`, `shouldSkipFetch` |
+| **爬取编排** | `CrawlerService`, `InitOrchestrator`, `runInitSections` / `runInitBoards` / `runInitPinned`, `BrowserPool`, `AuthManager`, `createRateLimiter` |
+| **审计 / 状态** | `appendFetchLog`, `getBoardCrawlState`, `upsertBoardCrawlState` |
+| **适配器** | `getAdapter`, `listAdapters` |
+| **工具** | `logger`, `addRedactedSecret`, `appLogPath`, `retry`, `parseConfig` |
+| **错误** | `BaseAppError`, `MissingCredentialsError`, `LoginFailedError`, `SessionExpiredError`, `NavigationTimeoutError`, `RateLimitedError`, `BoardNotFoundError`, `FetchFailedError`, `DatabaseError`, `UnknownSiteError` |
 
-`forum_search` / `forum_query_cache` / `forum_relogin` 已被移除——搜索/缓存查询由 [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) 项目负责；重登在凭据缓存可用时自动发生。
+下游 MCP 风格消费方的典型用法：
 
-### 回包结构
+```typescript
+import {
+  initDb, parseConfig, BrowserPool, AuthManager, createRateLimiter,
+  CrawlerService, getAdapter, upsertThread, upsertPosts, appendFetchLog,
+} from 'bbs-crawler';
+import 'bbs-crawler/dist/adapters';   // 副作用导入：注册 adapter
 
-4 个工具统一返回如下 JSON envelope（包成 MCP 单 `text` content）：
+const cfg = parseConfig(process.env);
+initDb({ dataDir: cfg.dataDir });
 
-```jsonc
-// 成功
-{
-  "ok": true,
-  "data": <工具特定的数据>,
-  "nextCursor": { "startPage": 4 } | null,   // 仅 forum_list_threads
-  "state": {                                  // 仅 forum_list_threads
-    "deepestPageCrawled": 12,
-    "latestThreadPostedAt": "2026-05-08T03:14:00Z",
-    "lastCrawledAt": "2026-05-08T10:23:00Z"
-  }
-}
+const crawler = new CrawlerService({
+  rateLimiter: createRateLimiter({ /* ... */ }),
+  browserPool: new BrowserPool({ /* ... */ }),
+  auth: new AuthManager({ /* ... */ }),
+  registry: { getAdapter },
+  persistThread: async (siteKey, thread) => {
+    const { threadId, forumDb } = await upsertThread(siteKey, thread);
+    await upsertPosts(forumDb, threadId, thread.posts);
+    return threadId;
+  },
+  appendFetchLog,
+});
 
-// 失败
-{
-  "ok": false,
-  "error": { "code": "SESSION_EXPIRED" | "LOGIN_FAILED" | "BOARD_NOT_FOUND" | "FETCH_FAILED",
-             "message": "..." }
-}
-```
-
-不产生 `nextCursor` / `state` 的工具不会带这两个字段。
-
-### `forum_list_threads`
-
-```ts
-forum_list_threads({
-  siteKey: string,
-  boardName: string,                       // 严格等值匹配 boards.name
-  mode?: 'incremental' | 'pages',          // 默认 'incremental'
-  pages?: number,                          // 'pages' 模式生效；默认 3
-  cursor?: { startPage: number }           // 'pages' 模式续翻
-})
-```
-
-- **`incremental`**（默认）：从第 1 页开始抓，遇到 `posted_at <= 已存 watermark` 的帖子即停。**置顶帖不会触发停止**，也**不参与 watermark 推进**（它们的日期是任意旧值）。日常"看看有没有新帖"用这个。
-- **`pages`**：从 `cursor.startPage`（默认 1）开始抓 `pages` 页。回包带 `nextCursor`，agent 可以继续往历史里翻。想找更早的老帖用这个。
-
-每条结果的 `raw.threadId` 是形如 `"{boardKey}/{articleId}"` 的不透明字符串——直接传回给 `forum_get_thread`。
-
-### `forum_get_thread`
-
-```ts
-forum_get_thread({ siteKey: string, threadId: string })   // threadId = "{boardKey}/{articleId}"
+const result = await crawler.listThreadsByName({
+  siteKey: 'school-bbs',
+  boardName: '北邮人在上海',
+  mode: 'incremental',
+});
 ```
 
 ## 配置
 
-所有敏感信息只走环境变量。常用项：
+所有敏感信息走 `.env`（gitignored）。所有论坛结构相关在 `config/sites/`。
 
-| 变量 | 说明 |
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `{SITE_KEY}_USERNAME` / `_PASSWORD` / `_BASE_URL` / `_LOGIN_URL` | — | 每站点凭据。例如 `SCHOOL_BBS_USERNAME` |
+| `DATABASE_PATH` | `./.data` | `structure.db` + `forums/` 的根目录 |
+| `LOG_DIR` | `./.logs` | pino 文件 sink 根目录 |
+| `LOG_LEVEL` | `info` | `debug` 时输出更详细 |
+| `LOG_FILE_DISABLED` | `false` | 设 `true` 跳过文件 sink（`NODE_ENV=test` 时自动跳过） |
+| `BROWSER_HEADLESS` | `true` | 设 `false` 实时看 Chrome |
+| `BROWSER_EXECUTABLE_PATH` | （Playwright 自带） | 指定本地 Chrome 路径 |
+| `BROWSER_USER_AGENT` | （默认） | 覆盖 UA 字符串 |
+| `STORAGE_STATE_DIR` | `./.state` | `<siteKey>.json`（cookie）和 `*.credentials.enc` 的目录 |
+| `IDLE_TIMEOUT_MS` | `300000` | 浏览器空闲多少毫秒后自动关闭 |
+| `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | `1500` / `1000` / `1` | 限速参数 |
+| `CRED_KEY` | 主机名派生 | 凭据缓存的 AES key 种子 |
+| `SITE_CONFIG_DIR` | `./config/sites` | 配置目录覆盖（测试用） |
+
+每站点 YAML 在 `config/sites/`：
+
+| 文件 | 用途 |
 |---|---|
-| `PGDATA_DIR` | SQLite 数据存储目录（默认 `./.pgdata`） |
-| `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | 每个站点的凭据和地址，如 `SCHOOL_BBS_USERNAME` |
-| `BROWSER_HEADLESS` | 调试时设 `false`（默认 `true`） |
-| `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | 每站点的礼貌策略（默认 1500 / 1000 / 1） |
-| `STORAGE_STATE_DIR` | `storageState.json` 与 `*.credentials.enc` 的目录（默认 `./.state`） |
-| `CRED_KEY` | 可选。凭据加密的 AES key 派生种子。未设置时使用主机名派生的种子（单机使用足够）。 |
-| `LOG_LEVEL` | `debug` 时启用失败截图，写到 `./.state/debug/` |
+| `<siteKey>.yml` | Selectors、route 模板、爬取参数（间隔、并发、重试） |
+| `<siteKey>.entries.yml` | 顶级讨论区清单 —— `init:sections` 优先读这个，缺失则回退到爬首页 |
+| `<siteKey>.node-types.yml` | 节点形态声明：`forum` / `sub_forum` / `board` / `thread` + `childTypes` 关系 |
 
-`.env` 和 `./.state/` 都在 `.gitignore` 中。仓库只提交 `.env.example`。
+`.env` / `./.state/` / `./.data/` / `./.logs/` 都在 `.gitignore` 里。仓库只提交 `.env.example`。
 
-## 新增站点
+## 脚本说明
 
-1. 新建 `src/adapters/<site-key>/index.ts`，导出符合 `SiteAdapter` 接口的对象（见 [`src/core/site-adapter.ts`](src/core/site-adapter.ts)）。
-2. 实现 `isLoggedIn`、`login`、`listThreads`、`getThread`、`search`。辅助文件放在同目录（`selectors.ts`、`login.ts` 等）。
-3. 在 [`src/adapters/index.ts`](src/adapters/index.ts) 加一行 `import './<site-key>'`，触发 side-effect 注册。
-4. 在 `tests/fixtures/<site-key>/` 加 HTML 快照和集成测试。
-5. 把所需 env 变量（`<SITE_KEY_UPPER>_USERNAME` 等）补到 `.env.example`。
+### 认证
+| 脚本 | 用途 |
+|---|---|
+| `npm run login [siteKey]` | 交互式登录 + 保存 `storageState`；可选加密保存凭据 |
+| `npm run login:once [siteKey]` | 非交互式（仅 env）登录 |
 
-框架已经包办了浏览器池、会话持久化、限速、重试、写库——adapter 只负责把页面转换成结构化的 `Thread` / `ThreadSummary`。
+### 初始化流水线
+| 脚本 | 用途 |
+|---|---|
+| `npm run init:sections [siteKey]` | 入库顶级讨论区（先读 `entries.yml`，缺失则回退到爬首页） |
+| `npm run init:boards [siteKey]` | 递归爬取每个讨论区下的子讨论区 + 版面（已加环检测） |
+| `npm run init:pinned [siteKey] [--concurrency N] [--limit N] [--skip-done] [--help]` | 爬取置顶帖，含**按讨论区分组的进度报告**和**浏览器死亡检测** |
+| `npm run init` | 顺序跑完上面三步 |
+| `npm run init:export [siteKey] [outputPath]` | 导出论坛结构到 JSON |
+
+### 爬取
+| 脚本 | 用途 |
+|---|---|
+| `npm run crawl:board <boardPath>` | 保存某个版面页面的原始 HTML（探索用） |
+| `npm run crawl:section <sectionPath>` | 保存某个讨论区页面的原始 HTML |
+| `npm run crawl:pinned <boardKey>` | 保存某版面所有置顶帖的原始 HTML |
+| `npm run crawl:board-skip <boardKey> [freshnessHours]` | 生产风格：列出 + 抓取帖子，跳过近期已爬的（用 `shouldSkipFetch`） |
+
+### 数据库
+| 脚本 | 用途 |
+|---|---|
+| `npm run db:check [siteKey]` | 健康检查：列出 `structure.db` 的表 + 每个 `forums/*.db` 的表行数 |
+| `npm run db:migrate:layered -- [--dry-run] [--source ./old] [--target ./.data] [--yes]` | 一次性迁移：从老的两库布局（`structure.db` + `content.db`）迁到新的分层布局（per-forum `.db`） |
+
+### 调试
+| 脚本 | 用途 |
+|---|---|
+| `npm run debug:board <boardKey>` | 用**有头** Chrome 打开版面页面以可视化检查 |
+| `npm run debug:failed-boards` | 列出最近失败的版面 |
+| `npx tsx scripts/debug/check-cycles.ts` | 诊断 `nodes.parent_id` 是否有环（防数据腐败） |
+| `npx tsx scripts/debug/smoke-precheck.ts` | 快速检查环境 + DB |
+
+### 工具
+| 脚本 | 用途 |
+|---|---|
+| `npm run explore` | 通用探索工具 |
+| `npm run format:html <file>` | 美化原始 HTML 用于离线分析 |
+
+## 添加新站点
+
+1. `.env` 加变量：`<SITE_KEY_UPPER>_USERNAME` / `_PASSWORD` / `_BASE_URL` / `_LOGIN_URL`
+2. 新建 `config/sites/<siteKey>.yml`（selectors / routes / 爬取参数 —— 抄一份 `school-bbs.yml`）
+3. （可选但推荐）`<siteKey>.entries.yml` 和 `<siteKey>.node-types.yml`
+4. 实现 `src/adapters/<siteKey>/index.ts` 满足 [`SiteAdapter`](src/core/site-adapter.ts) 接口；模块顶层调 `register(adapter)`
+5. 在 [`src/adapters/index.ts`](src/adapters/index.ts) 加 `import './<siteKey>'`
+6. 跑 `npm run init:sections <siteKey>` 等
+
+框架已经包办了浏览器池、会话持久化、限速、重试、写库。adapter 只负责把页面 DOM 转成结构化的 `Thread` / `ThreadSummary`。
 
 ## 目录结构
 
 ```
 src/
-  server/            MCP tool 注册 + JSON Schema
-  core/              编排层：registry / crawler-service / auth / browser pool / rate limiter
-  repository/        所有 SQL（不引 ORM）
-  adapters/          每个站点一个文件夹
-migrations/          node-pg-migrate 的 SQL 文件
-tests/fixtures/      脱敏 HTML 快照，驱动 adapter 集成测试
-scripts/             一次性 CLI 工具（login-once、inspect）
+  core/                browser-pool / rate-limiter / auth-manager / init-orchestrator+runners /
+                       crawler-service / registry / site-adapter / site-config / errors
+  repository/          逐表 SQL 访问；分层存储路由
+  adapters/            每个站点一个文件夹（目前只有 school-bbs）
+  util/                logger, retry
+  index.ts             公开库入口
+config/
+  sites/               每站点 YAML 配置
+scripts/
+  auth/                do-login, login-once
+  init/                init-sections, init-boards, init-pinned, export-structure
+  crawl/               crawl-board, crawl-section, crawl-pinned, crawl-board-with-skip,
+                       crawl-forum-structure
+  db/                  check-db, migrate-to-layered
+  debug/               debug-board, explore-failed-boards, smoke-precheck, check-cycles, ...
+  util/                explore, format-html
+tests/
+  unit/                vitest 套件：core, repository, util, adapter
+.shadow/               中文设计文档（架构 / 模块 / 工作流）
 ```
 
-## 脚本说明
+## 文档
 
-### 认证脚本
+详细设计文档在 [`.shadow/`](.shadow/)（中文，给开发者也给非开发者看）：
 
-| 脚本 | 用途 | 使用方法 |
-|---|---|---|
-| `login` | 交互式登录并保存 storageState | `npm run login [siteKey]` |
-| `login:once` | 非交互式登录（需要已设置环境变量） | `npm run login:once [siteKey]` |
-
-### 初始化脚本（针对 school-bbs）
-
-按顺序运行以探索并持久化论坛结构：
-
-| 脚本 | 用途 | 使用方法 |
-|---|---|---|
-| `init:sections` | 从首页爬取顶层分区并持久化到数据库 | `npm run init:sections [siteKey]` |
-| `init:boards` | 对每个分区，爬取其二级分区和版面并持久化 | `npm run init:boards [siteKey]` |
-| `init:pinned` | 对每个版面，发现置顶帖并爬取完整内容（含回复） | `npm run init:pinned [siteKey] [--limit N] [--concurrency K] [--skip-done]` |
-
-注意：`init:pinned` 有智能重试机制：在并发爬取时失败的版面会在主轮次结束后，以单线程（concurrency=1）顺序重试，最多重试 3 轮。
-
-### 爬取脚本
-
-| 脚本 | 用途 | 使用方法 |
-|---|---|---|
-| `crawl:board` | 爬取某个版面页面并保存原始 HTML 供分析 | `npx tsx scripts/crawl/crawl-board.ts <boardPath>` |
-| `crawl:section` | 爬取某个分区页面并保存原始 HTML 供分析 | `npx tsx scripts/crawl/crawl-section.ts <sectionPath>` |
-| `crawl:pinned` | 爬取某个版面的置顶帖并保存原始 HTML | `npx tsx scripts/crawl/crawl-pinned.ts <boardKey>` |
-| `crawl:board-skip` | 带跳过逻辑的版面爬取（自定义行为） | `npx tsx scripts/crawl/crawl-board-with-skip.ts` |
-
-### 调试脚本
-
-| 脚本 | 用途 | 使用方法 |
-|---|---|---|
-| `debug:board` | 交互式调试某个版面页面 | `npx tsx scripts/debug/debug-board.ts` |
-| `debug:failed-boards` | 探索爬取失败的版面 | `npx tsx scripts/debug/explore-failed-boards.ts` |
-| `debug:find-thread` | 查找并检查特定帖子 | `npx tsx scripts/debug/find-thread.ts` |
-| `debug:inspect` | 交互式检查论坛 | `npx tsx scripts/debug/inspect-forum.ts` |
-| `explore` | 通用探索工具 | `npx tsx scripts/util/explore.ts` |
-
-### 数据库脚本
-
-| 脚本 | 用途 | 使用方法 |
-|---|---|---|
-| `db:check` | 验证数据库连接和 schema | `npm run db:check` |
-| `db:migrate:up` | 运行待处理的数据库迁移 | `npm run db:migrate:up` |
-| `db:migrate:down` | 回滚上一个迁移 | `npm run db:migrate:down` |
-| `db:migrate:status` | 显示迁移状态 | `npm run db:migrate:status` |
-| `db:delete-pinned` | 删除置顶帖记录（用于重新爬取） | `npm run db:delete-pinned` |
-
-### 工具脚本
-
-| 脚本 | 用途 | 使用方法 |
-|---|---|---|
-| `format:html` | 格式化原始 HTML 文件以提高可读性 | `npx tsx scripts/util/format-html.ts <file.html>` |
+- [`README.md`](.shadow/README.md) —— 项目定位
+- [`数据库.md`](.shadow/数据库.md) —— 分层 SQLite 设计、schema、迁移路径
+- [`配置文件.md`](.shadow/配置文件.md) —— 三类 YAML 配置文件
+- [`工作流程/01-初始化.md`](.shadow/工作流程/01-初始化.md) —— 初始化流水线
+- [`工作流程/02-爬取版面帖子.md`](.shadow/工作流程/02-爬取版面帖子.md) —— 爬取版面帖子工作流
+- [`模块/`](.shadow/模块/) —— 各模块详细规格（爬虫、浏览器与会话、数据库访问层、配置加载、限速、重试与错误、日志、元数据 CRUD 接口）
 
 ## Roadmap
 
-已完成：
+已完成（Phase 1–3）：
+- pino multistream + 按日切割的应用日志 + 脱敏
+- 配置驱动初始化（`entries.yml` + `node-types.yml`）
+- 分层 SQLite 存储（per-forum `.db`），nodes 递归树，自动应用 schema，**深度受限**且**避免环**的 CTE 走链
+- 一次性迁移脚本（`db:migrate:layered`）含 `--dry-run`、原子 rename、备份
+- `init-pinned` 加固：按讨论区分组的进度报告（每 5 秒）、浏览器死亡检测 + 优雅退出、`--skip-done` 续跑、严格的 CLI 解析
+- `init-boards` 环保护：`visited` 集合 + 跳过把自己列为子节点的情况
+- 删除 pg-mem 死测试、`search.ts`、老 migration 框架
 
-- 登录 + 会话持久化（`storageState.json`）
-- 加密"记住密码"凭据缓存 + 自动重登
-- 论坛结构爬取（分区 / 二级分区 / 版面 / 置顶帖）
-- `forum_list_threads` 的 `incremental` / `pages` 双模式 + 每版面爬取进度跟踪（`board_crawl_state` 表）
-- `forum_get_thread` 通过复合 `{boardKey}/{articleId}` 标识取帖
-- 4 个稳定的错误码（`SESSION_EXPIRED` / `LOGIN_FAILED` / `BOARD_NOT_FOUND` / `FETCH_FAILED`）
-- **首次 MCP 工具调用时自动触发初始化**（无需手动 `npm run init:*`）
-- 扩展 `school-bbs` 日期解析器（支持 `MM-DD`、`HH:MM`、`今天/昨天/前天`、`N天前`）
-- 修复：storageState 路径对齐、置顶帖识别、日期解析（smoke test 发现的 bug）
-
-下一步：
-
-- 修复 `tests/unit/repository/**` 单元测试套件（SQLite 迁移后被排除，需要重写）
-
-v1 范围外（已显式延后）：验证码 / SSO / 2FA、低层 `browser_*` MCP tool、`school-bbs` 之外的更多站点、中文分词 FTS、定时调度器、分布式部署、MCP 内的搜索/缓存读取工具（由 `BBS_Database` 负责）。
+本仓库范围外（在别处实现）：
+- MCP 服务（独立的下游项目，把本仓库当库引）
+- 全文 / 向量搜索 + RAG
+- `school-bbs` 之外更多站点适配器
+- 后台调度器 / 多机部署
 
 ## 隐私
 
-- 源码、测试中绝不出现明文 URL / 账号 / 密码；`.env` 在 `.gitignore` 中。
-- Logger 在写日志时自动脱敏已注册的凭据字符串。
-- `storageState.json`（含 cookie）写盘后 chmod 0600（Windows 上尽力而为），不进 git。
+- `.env`、`./.state/`、`./.logs/`、`./.data/` 都在 `.gitignore` 中
+- pino 自动脱敏注册过的字符串（通过 `addRedactedSecret(...)`）—— `AuthManager` 在首次登录时注册凭据
+- 凭据缓存用 AES-256-GCM，默认 key 从主机名派生；用 `CRED_KEY` 自定义可以跨机迁移
+- `storageState.json`（含 cookie）写盘后 chmod 0600（Windows 上尽力而为）
 
 ## License
 

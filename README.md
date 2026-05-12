@@ -1,36 +1,45 @@
 # BBS_Crawler
 
-A Playwright-based MCP server that crawls forum posts and persists them to a local SQLite database. Designed as the data-ingestion layer of the **BBS Agent of BYR** project.
+A Playwright-based forum crawler that persists posts into a layered SQLite store and exposes a TypeScript library for downstream consumers. The data-ingestion layer of the **BBS Agent of BYR** project.
 
-> Status: **stable, production-ready** — full `school-bbs` lifecycle complete, 4 MCP tools working, all smoke tests passing. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
+> Status: **Phase 3 landed** — layered per-forum SQLite storage, config-driven init, recursive node tree, hardened init pipeline. `school-bbs` adapter is complete. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
+
+> This project is **not an MCP service**. It's a TypeScript library + CLI scripts. The MCP server lives in a separate downstream project that imports this as a dependency. See [`.shadow/README.md`](.shadow/README.md) for the project's design rationale.
 
 ## What it does
 
-- Exposes 4 high-level MCP tools (`forum_list_sites`, `forum_list_threads`, `forum_get_thread`, `forum_session_status`) so a custom agent can crawl forum content on demand.
-- Drives a real Chromium browser via Playwright so login-gated pages are reachable.
-- Persists login sessions via Playwright `storageState` — the agent never re-submits credentials on every call.
-- Optional encrypted local credential cache (AES-256-GCM) so cookies-expiry doesn't force a manual re-login when the user opted into "remember password".
-- Always upserts crawled content to the embedded SQLite database. Single-table `threads` with `is_pinned` flag separates init-time pinned threads from on-demand crawled threads; `board_crawl_state` tracks per-board crawl progress so the agent can incrementally pull only what's new.
-- Downstream query / RAG / embeddings live in the [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) project — this MCP only crawls and persists.
-- Pluggable site adapters: ships with a `school-bbs` adapter; new sites are added by dropping a file under `src/adapters/<site>/`.
+- Crawls forum content (sections / boards / pinned threads / regular threads / posts) via Playwright Chromium.
+- Persists everything into a **layered SQLite** layout: a single `structure.db` carrying the recursive node tree, plus one `forums/<key>.db` per top-level discussion area.
+- Auto-applies schema on first open — no separate migration framework for fresh installs.
+- Pluggable site adapters: ships with a `school-bbs` adapter; new sites are added by dropping a folder under `src/adapters/<site>/` plus a YAML config.
+- **Config-driven init**: top-level forums and node shapes are declared in `config/sites/<siteKey>.entries.yml` and `<siteKey>.node-types.yml` — the homepage HTML is no longer the source of truth.
+- Login flow with `storageState` persistence + optional encrypted credential cache (AES-256-GCM) so cookie expiry never forces a manual re-login.
+- Per-board incremental crawl state (`board_crawl_state.last_thread_posted_at` watermark) so consumers only fetch what's new.
+- Structured logging via pino multistream (stdout + daily-rotated `.logs/app/app-<date>.log`).
+
+## What it doesn't do
+
+- **Not an MCP service** — that's a downstream project's job.
+- No full-text search — `search.ts` was removed; the downstream RAG / search project owns that.
+- No browser-level low-level tools.
 
 ## How it fits the ecosystem
 
 | Repo | Role |
 |---|---|
-| [`BBS_Crawler`](https://github.com/VeinsureLee/BBS_Crawler) (this repo) | Browser-driven crawler + MCP server; writes Postgres |
-| [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database) | Storage stack: SQLite (raw) + Chroma (embeddings) + Neo4j (relations) |
-| [`BBS_Agent`](https://github.com/VeinsureLee/BBS_Agent) | Multi-Index RAG agent that consumes the MCP and queries the database |
+| **`BBS_Crawler` (this repo)** | Browser-driven crawler + layered SQLite store + TS library |
+| `BBS_Database` | Storage stack: SQLite (raw) + Chroma (embeddings) + Neo4j (relations) |
+| `BBS_Agent` | Multi-Index RAG agent that consumes the MCP layer (separate repo) |
 
-This crawler **owns** the SQLite schema for forum content. `BBS_Database` reads the same Postgres to build embeddings / graph indexes downstream.
+This crawler **owns** the layered SQLite schema. Downstream consumers query the same files (read-only) to build embeddings / graph indexes.
 
 ## Tech stack
 
 - TypeScript (Node 20+)
 - [Playwright](https://playwright.dev/) (Chromium only)
-- [SQLite](https://pglite.dev/) (embedded SQLite, no external DB required)
-- [`@modelcontextprotocol/sdk`](https://github.com/modelcontextprotocol/typescript-sdk) for MCP transport (stdio)
-- `zod` for env / input validation, `pino` for structured logging
+- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (synchronous embedded SQLite, WAL mode)
+- [js-yaml](https://github.com/nodeca/js-yaml) + [zod](https://zod.dev/) for config loading and validation
+- [pino](https://getpino.io/) for structured logging (stdout + file sink)
 
 ## Quick start
 
@@ -41,226 +50,230 @@ npx playwright install chromium
 
 # 2. configure
 cp .env.example .env
-# fill in SCHOOL_BBS_USERNAME, SCHOOL_BBS_PASSWORD, SCHOOL_BBS_BASE_URL
-# (PGDATA_DIR is optional, defaults to ./.pgdata)
+# fill in SCHOOL_BBS_USERNAME / SCHOOL_BBS_PASSWORD / SCHOOL_BBS_BASE_URL
+# DATABASE_PATH defaults to ./.data
 
 # 3. first-time login (saves storageState; prompts whether to remember password)
-npm run login school-bbs
+npm run login
 
-# 4. initialize forum structure (run once)
-npm run init:sections school-bbs
-npm run init:boards school-bbs
-npm run init:pinned school-bbs
+# 4. initialize forum structure
+npm run init:sections          # top-level forums (entries.yml first, fallback to homepage)
+npm run init:boards            # boards + sub-forums
+npm run init:pinned -- --concurrency 8       # use 8 (not the default 16) to be safe on chrome memory
 
-# 5. run as MCP server (stdio)
-# Recommend `npm run dev` (uses tsx) for daily use; `npm run start` (node dist) requires a build first
-npm run dev
-
-# Optional: run end-to-end smoke test to verify everything works
-npx tsx scripts/debug/smoke-mcp.ts
+# 5. (optional) watch live progress in another terminal
+Get-Content .logs/app/app-*.log -Wait -Tail 0 |
+  Select-String '"stage":"progress' |
+  ForEach-Object { ($_ | ConvertFrom-Json).msg }
 ```
 
-The login flow asks `Remember password? (y/N)`. Choosing `y` writes encrypted credentials to `./.state/<siteKey>.credentials.enc` (AES-256-GCM, mode 0600). When cookies later expire, the auth manager auto-relogins from the cached credentials and the agent never sees a `SESSION_EXPIRED`. Choosing `N` keeps cookies-only mode — re-run `npm run login` whenever the session lapses.
+After step 4 your data layout looks like:
 
-To plug into a Claude Code / Claude Desktop / custom agent, register the binary as a stdio MCP server. Example `claude_desktop_config.json` snippet:
-
-```json
-{
-  "mcpServers": {
-    "bbs-crawler": {
-      "command": "node",
-      "args": ["d:/MyProject/Python_Project/BBS_Crawler/dist/index.js"],
-      "env": {
-        "SCHOOL_BBS_USERNAME": "...",
-        "SCHOOL_BBS_PASSWORD": "...",
-        "SCHOOL_BBS_BASE_URL": "..."
-      }
-    }
-  }
-}
+```
+.data/
+  structure.db              sites + nodes (recursive tree) + fetch_log
+  forums/
+    本站站务.db                threads + posts + board_crawl_state + daily_traffic
+    校园生活.db
+    学术科技.db
+    ...
 ```
 
-## MCP tools
+The `npm run login` flow asks `Remember password? (y/N)`. Choosing `y` writes encrypted credentials to `./.state/<siteKey>.credentials.enc` (AES-256-GCM, mode 0600). When cookies later expire, the AuthManager auto-relogins from the cache.
 
-| Tool | Purpose |
+## Library API
+
+The project is consumed as a TypeScript library. Public surface in [`src/index.ts`](src/index.ts):
+
+| Group | Exports |
 |---|---|
-| `forum_list_sites` | Discover which adapters are registered |
-| `forum_list_threads` | Crawl threads from a board by exact name (incremental or paged) |
-| `forum_get_thread` | Fetch a single thread including all replies |
-| `forum_session_status` | Inspect login state for a site |
+| **Database** | `initDb`, `getStructureDb`, `getForumDb`, `closeAllDbs`, `STRUCTURE_SCHEMA`, `FORUM_SCHEMA` |
+| **Sites / nodes** | `upsertSite`, `upsertSection`, `hasSections`, `listTopLevelSections`, `sectionsMissingBoards` |
+| **Boards** | `upsertBoard`, `listBoards`, `boardsMissingPinned`, `findBoardByName`, `getBoardById`, `resolveBoardRoute`, `findForumDbFileForBoard` |
+| **Threads / posts** | `upsertThread`, `upsertThreadSummary`, `upsertPosts`, `checkThreadExists`, `getCrawledThreadUrls`, `shouldSkipFetch` |
+| **Crawl orchestration** | `CrawlerService`, `InitOrchestrator`, `runInitSections` / `runInitBoards` / `runInitPinned`, `BrowserPool`, `AuthManager`, `createRateLimiter` |
+| **Audit / state** | `appendFetchLog`, `getBoardCrawlState`, `upsertBoardCrawlState` |
+| **Adapter** | `getAdapter`, `listAdapters` |
+| **Util** | `logger`, `addRedactedSecret`, `appLogPath`, `retry`, `parseConfig` |
+| **Errors** | `BaseAppError`, `MissingCredentialsError`, `LoginFailedError`, `SessionExpiredError`, `NavigationTimeoutError`, `RateLimitedError`, `BoardNotFoundError`, `FetchFailedError`, `DatabaseError`, `UnknownSiteError` |
 
-`forum_search`, `forum_query_cache`, and `forum_relogin` were removed — search/cache reads are the responsibility of [`BBS_Database`](https://github.com/VeinsureLee/BBS_Database); re-login happens automatically when the credential store has cached credentials.
+Typical flow for a downstream MCP-style consumer:
 
-### Response envelope
+```typescript
+import {
+  initDb, parseConfig, BrowserPool, AuthManager, createRateLimiter,
+  CrawlerService, getAdapter, upsertThread, upsertPosts, appendFetchLog,
+} from 'bbs-crawler';
+import 'bbs-crawler/dist/adapters';   // side-effect: register adapters
 
-All four tools return a uniform JSON envelope (serialized as a single MCP `text` content part):
+const cfg = parseConfig(process.env);
+initDb({ dataDir: cfg.dataDir });
 
-```jsonc
-// success
-{
-  "ok": true,
-  "data": <tool-specific payload>,
-  "nextCursor": { "startPage": 4 } | null,   // forum_list_threads only
-  "state": {                                  // forum_list_threads only
-    "deepestPageCrawled": 12,
-    "latestThreadPostedAt": "2026-05-08T03:14:00Z",
-    "lastCrawledAt": "2026-05-08T10:23:00Z"
-  }
-}
+const crawler = new CrawlerService({
+  rateLimiter: createRateLimiter({ /* ... */ }),
+  browserPool: new BrowserPool({ /* ... */ }),
+  auth: new AuthManager({ /* ... */ }),
+  registry: { getAdapter },
+  persistThread: async (siteKey, thread) => {
+    const { threadId, forumDb } = await upsertThread(siteKey, thread);
+    await upsertPosts(forumDb, threadId, thread.posts);
+    return threadId;
+  },
+  appendFetchLog,
+});
 
-// failure
-{
-  "ok": false,
-  "error": { "code": "SESSION_EXPIRED" | "LOGIN_FAILED" | "BOARD_NOT_FOUND" | "FETCH_FAILED",
-             "message": "..." }
-}
-```
-
-`nextCursor` and `state` are omitted on tools that don't produce them.
-
-### `forum_list_threads`
-
-```ts
-forum_list_threads({
-  siteKey: string,
-  boardName: string,                       // strict equality match against boards.name
-  mode?: 'incremental' | 'pages',          // default: 'incremental'
-  pages?: number,                          // 'pages' mode; default 3
-  cursor?: { startPage: number }           // 'pages' mode continuation
-})
-```
-
-- **`incremental`** (default): start at page 1, stop when a thread's `posted_at` is `<=` the stored watermark. Pinned threads do NOT trigger the stop and do NOT advance the watermark (their dates are arbitrary). Best for "what's new since last time".
-- **`pages`**: crawl exactly `pages` pages starting at `cursor.startPage` (default 1). Returns `nextCursor` so the agent can keep paging back through history. Best for finding older threads.
-
-Each result row carries `raw.threadId` of the form `"{boardKey}/{articleId}"` — pass that opaque string back to `forum_get_thread`.
-
-### `forum_get_thread`
-
-```ts
-forum_get_thread({ siteKey: string, threadId: string })   // threadId = "{boardKey}/{articleId}"
+const result = await crawler.listThreadsByName({
+  siteKey: 'school-bbs',
+  boardName: '北邮人在上海',
+  mode: 'incremental',
+});
 ```
 
 ## Configuration
 
-All secrets live in environment variables. The headline ones:
+All secrets in `.env` (gitignored). All forum-structure config in `config/sites/`.
 
-| Var | Purpose |
+| Env var | Default | Purpose |
+|---|---|---|
+| `{SITE_KEY}_USERNAME` / `_PASSWORD` / `_BASE_URL` / `_LOGIN_URL` | — | Per-site credentials. e.g. `SCHOOL_BBS_USERNAME` |
+| `DATABASE_PATH` | `./.data` | Root for `structure.db` + `forums/` |
+| `LOG_DIR` | `./.logs` | pino file sink root |
+| `LOG_LEVEL` | `info` | `debug` for verbose |
+| `LOG_FILE_DISABLED` | `false` | Set `true` to skip file sink (auto-disabled under `NODE_ENV=test`) |
+| `BROWSER_HEADLESS` | `true` | `false` to watch Chrome live |
+| `BROWSER_EXECUTABLE_PATH` | (Playwright bundled) | Pin to your local Chrome binary |
+| `BROWSER_USER_AGENT` | (default) | Override UA string |
+| `STORAGE_STATE_DIR` | `./.state` | Where `<siteKey>.json` (cookies) and `*.credentials.enc` live |
+| `IDLE_TIMEOUT_MS` | `300000` | Auto-close browser after N ms idle |
+| `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | `1500` / `1000` / `1` | Rate limiter knobs |
+| `CRED_KEY` | hostname-derived | AES key for credential cache |
+| `SITE_CONFIG_DIR` | `./config/sites` | Override config dir (used by tests) |
+
+Per-site YAML lives under `config/sites/`:
+
+| File | Purpose |
 |---|---|
-| `PGDATA_DIR` | Path for SQLite storage directory (default: `./.pgdata`) |
-| `{SITE_KEY_UPPER}_USERNAME` / `_PASSWORD` / `_BASE_URL` | Per-site credentials and base URL, e.g. `SCHOOL_BBS_USERNAME` |
-| `BROWSER_HEADLESS` | `false` for visual debugging (default `true`) |
-| `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | Per-site politeness knobs (defaults: 1500 / 1000 / 1) |
-| `STORAGE_STATE_DIR` | Where `storageState.json` and `*.credentials.enc` files live (default `./.state`) |
-| `CRED_KEY` | Optional. Stable secret used to derive the AES key for credential storage. Defaults to a hostname-bound seed when unset (sufficient for single-machine use). |
-| `LOG_LEVEL` | `debug` enables failure screenshots under `./.state/debug/` |
+| `<siteKey>.yml` | Selectors, route templates, crawl parameters (intervals, concurrency, retries) |
+| `<siteKey>.entries.yml` | Top-level forum list — `init:sections` reads this first; falls back to homepage crawl when missing/empty |
+| `<siteKey>.node-types.yml` | Node shape declarations: `forum` / `sub_forum` / `board` / `thread` + `childTypes` relationships |
 
-`.env` and `./.state/` are gitignored. Only `.env.example` is committed.
+`.env`, `./.state/`, `./.data/`, and `./.logs/` are all gitignored. Only `.env.example` is committed.
+
+## Scripts
+
+### Auth
+| Script | Purpose |
+|---|---|
+| `npm run login [siteKey]` | Interactive login + save `storageState`; optionally encrypt-store credentials |
+| `npm run login:once [siteKey]` | Non-interactive (env-only) login |
+
+### Init pipeline
+| Script | Purpose |
+|---|---|
+| `npm run init:sections [siteKey]` | Persist top-level forums (`entries.yml` first, falls back to homepage) |
+| `npm run init:boards [siteKey]` | Recursively crawl each forum's section + board structure (cycle-safe) |
+| `npm run init:pinned [siteKey] [--concurrency N] [--limit N] [--skip-done] [--help]` | Crawl pinned threads with per-forum progress reporter and browser-dead detection |
+| `npm run init` | Run all three sequentially |
+| `npm run init:export [siteKey] [outputPath]` | Export forum structure to JSON |
+
+### Crawl
+| Script | Purpose |
+|---|---|
+| `npm run crawl:board <boardPath>` | Save raw HTML of one board page (exploration helper) |
+| `npm run crawl:section <sectionPath>` | Save raw HTML of one section page |
+| `npm run crawl:pinned <boardKey>` | Save raw HTMLs of all pinned threads of a board |
+| `npm run crawl:board-skip <boardKey> [freshnessHours]` | Production-style: list + fetch threads, skipping recent ones via `shouldSkipFetch` |
+
+### Database
+| Script | Purpose |
+|---|---|
+| `npm run db:check [siteKey]` | Health check: list tables in `structure.db` + every `forums/*.db` with row counts |
+| `npm run db:migrate:layered -- [--dry-run] [--source ./old] [--target ./.data] [--yes]` | One-shot migration from legacy two-database layout (`structure.db` + `content.db`) to the new layered layout (per-forum `.db` files) |
+
+### Debug
+| Script | Purpose |
+|---|---|
+| `npm run debug:board <boardKey>` | Open the board page with **headed** Chrome for visual inspection |
+| `npm run debug:failed-boards` | List boards that recently failed |
+| `npx tsx scripts/debug/check-cycles.ts` | Diagnose cycles in `nodes.parent_id` (corruption check) |
+| `npx tsx scripts/debug/smoke-precheck.ts` | Quick env + DB sanity check |
+
+### Util
+| Script | Purpose |
+|---|---|
+| `npm run explore` | General exploration utility |
+| `npm run format:html <file>` | Pretty-print raw HTML for offline analysis |
 
 ## Adding a new site
 
-1. Create `src/adapters/<site-key>/index.ts` exporting an object that satisfies `SiteAdapter` (see [`src/core/site-adapter.ts`](src/core/site-adapter.ts)).
-2. Implement `isLoggedIn`, `login`, `listThreads`, `getThread`, `search`. Helpers go in sibling files (`selectors.ts`, `login.ts`, ...).
-3. Add a `import './<site-key>'` in [`src/adapters/index.ts`](src/adapters/index.ts) for side-effect registration.
-4. Add HTML fixtures under `tests/fixtures/<site-key>/` and an integration test.
-5. Document required env vars (`<SITE_KEY_UPPER>_USERNAME`, etc.) in `.env.example`.
+1. Add env vars to `.env`: `<SITE_KEY_UPPER>_USERNAME` / `_PASSWORD` / `_BASE_URL` / `_LOGIN_URL`.
+2. Create `config/sites/<siteKey>.yml` (selectors / routes / crawl knobs — copy from `school-bbs.yml`).
+3. (Optional but recommended) `<siteKey>.entries.yml` and `<siteKey>.node-types.yml`.
+4. Implement `src/adapters/<siteKey>/index.ts` satisfying [`SiteAdapter`](src/core/site-adapter.ts); call `register(adapter)` at module level.
+5. Add `import './<siteKey>'` to [`src/adapters/index.ts`](src/adapters/index.ts).
+6. Run `npm run init:sections <siteKey>` etc.
 
-The framework provides browser pooling, session persistence, rate limiting, retries, and DB persistence — adapters only convert page content into the structured `Thread` / `ThreadSummary` types.
+The framework already provides browser pooling, session persistence, rate limiting, retries, and DB persistence. Adapters only convert page DOM into the structured `Thread` / `ThreadSummary` types.
 
 ## Project layout
 
 ```
 src/
-  server/            MCP tool registration + JSON Schemas
-  core/              orchestration: registry, crawler-service, auth, browser pool, rate limiter
-  repository/        all SQL (no ORM)
-  adapters/          one folder per site
-migrations/          node-pg-migrate SQL files
-tests/fixtures/      redacted HTML snapshots driving adapter integration tests
-scripts/             one-shot CLI helpers (login-once, inspect)
+  core/                browser-pool, rate-limiter, auth-manager, init-orchestrator/runners,
+                       crawler-service, registry, site-adapter, site-config, errors
+  repository/          per-table SQL access; layered storage routing
+  adapters/            one folder per site (currently school-bbs only)
+  util/                logger, retry
+  index.ts             public library entry
+config/
+  sites/               per-site YAML config
+scripts/
+  auth/                do-login, login-once
+  init/                init-sections, init-boards, init-pinned, export-structure
+  crawl/               crawl-board, crawl-section, crawl-pinned, crawl-board-with-skip,
+                       crawl-forum-structure
+  db/                  check-db, migrate-to-layered
+  debug/               debug-board, explore-failed-boards, smoke-precheck, check-cycles, ...
+  util/                explore, format-html
+tests/
+  unit/                vitest suites for core, repository, util, adapter
+.shadow/               Chinese design documentation (architecture, modules, workflows)
 ```
 
-## Scripts
+## Documentation
 
-### Authentication scripts
+In-depth design docs in [`.shadow/`](.shadow/) (Chinese, accessible to non-developers):
 
-| Script | Purpose | Usage |
-|---|---|---|
-| `login` | Perform interactive login and save storageState | `npm run login [siteKey]` |
-| `login:once` | Non-interactive login (requires env vars set) | `npm run login:once [siteKey]` |
-
-### Initialization scripts (for school-bbs)
-
-Run these in order to explore and persist the forum structure:
-
-| Script | Purpose | Usage |
-|---|---|---|
-| `init:sections` | Crawl top-level sections from homepage and persist to DB | `npm run init:sections [siteKey]` |
-| `init:boards` | For each section, crawl its subsections and boards and persist to DB | `npm run init:boards [siteKey]` |
-| `init:pinned` | For each board, discover pinned threads and crawl them with replies | `npm run init:pinned [siteKey] [--limit N] [--concurrency K] [--skip-done]` |
-
-Note: `init:pinned` has smart retry handling: boards that fail during concurrent crawl are retried sequentially (concurrency=1) in up to 3 retry passes.
-
-### Crawling scripts
-
-| Script | Purpose | Usage |
-|---|---|---|
-| `crawl:board` | Crawl a specific board page and save raw HTML for inspection | `npx tsx scripts/crawl/crawl-board.ts <boardPath>` |
-| `crawl:section` | Crawl a specific section page and save raw HTML for inspection | `npx tsx scripts/crawl/crawl-section.ts <sectionPath>` |
-| `crawl:pinned` | Crawl pinned threads from a board and save raw HTMLs | `npx tsx scripts/crawl/crawl-pinned.ts <boardKey>` |
-| `crawl:board-skip` | Crawl a board with skip logic (custom behavior) | `npx tsx scripts/crawl/crawl-board-with-skip.ts` |
-
-### Debug scripts
-
-| Script | Purpose | Usage |
-|---|---|---|
-| `debug:board` | Debug a specific board page interactively | `npx tsx scripts/debug/debug-board.ts` |
-| `debug:failed-boards` | Explore boards that failed during crawl | `npx tsx scripts/debug/explore-failed-boards.ts` |
-| `debug:find-thread` | Find and inspect a specific thread | `npx tsx scripts/debug/find-thread.ts` |
-| `debug:inspect` | Inspect the forum interactively | `npx tsx scripts/debug/inspect-forum.ts` |
-| `explore` | General exploration utility | `npx tsx scripts/util/explore.ts` |
-
-### Database scripts
-
-| Script | Purpose | Usage |
-|---|---|---|
-| `db:check` | Verify database connection and schema | `npm run db:check` |
-| `db:migrate:up` | Run pending database migrations | `npm run db:migrate:up` |
-| `db:migrate:down` | Roll back last migration | `npm run db:migrate:down` |
-| `db:migrate:status` | Show migration status | `npm run db:migrate:status` |
-| `db:delete-pinned` | Delete pinned thread records (for re-crawl) | `npm run db:delete-pinned` |
-
-### Utility scripts
-
-| Script | Purpose | Usage |
-|---|---|---|
-| `format:html` | Format raw HTML files for readability | `npx tsx scripts/util/format-html.ts <file.html>` |
+- [`README.md`](.shadow/README.md) — project orientation
+- [`数据库.md`](.shadow/数据库.md) — layered SQLite design, schema, migration plan
+- [`配置文件.md`](.shadow/配置文件.md) — three YAML config files and their roles
+- [`工作流程/01-初始化.md`](.shadow/工作流程/01-初始化.md) — init pipeline
+- [`工作流程/02-爬取版面帖子.md`](.shadow/工作流程/02-爬取版面帖子.md) — crawl-board workflow
+- [`模块/`](.shadow/模块/) — per-module specs (crawler, browser/session, db access, config loading, rate limiting, retry, logging, metadata CRUD)
 
 ## Roadmap
 
-Already landed:
+Done (Phase 1–3):
+- pino multistream + daily-rotated app log + redaction
+- Config-driven init via `entries.yml` + `node-types.yml`
+- Layered SQLite storage (per-forum `.db`), nodes recursive tree, auto-applied schema, depth-bounded cycle-safe CTE walks
+- One-shot migration script (`db:migrate:layered`) with `--dry-run`, atomic rename, backup
+- `init-pinned` hardening: per-forum progress reporter (every 5s), browser-dead detection + graceful exit, `--skip-done` resume, strict CLI parsing
+- `init-boards` cycle protection: `visited` set + skip-self-children
+- Removed dead pg-mem tests, `search.ts`, legacy migration framework
 
-- Login + session persistence via `storageState.json`
-- Encrypted "remember password" credential cache + auto-relogin
-- Forum structure crawling (sections / boards / pinned threads)
-- `forum_list_threads` with `incremental` / `pages` modes and per-board crawl-state tracking
-- `forum_get_thread` by composite `{boardKey}/{articleId}` id
-- 4 stable error codes (`SESSION_EXPIRED` / `LOGIN_FAILED` / `BOARD_NOT_FOUND` / `FETCH_FAILED`)
-- **Auto-init on first MCP tool call** (no manual `npm run init:*` required)
-- Expanded date parser for `school-bbs` (handles `MM-DD`, `HH:MM`, `今天/昨天/前天`, `N天前`)
-- Fixed: storageState path alignment, pinned thread detection, date parsing (smoke test bugs)
-
-Next up:
-
-- Restore the unit test suite for `tests/unit/repository/**` (currently excluded after the SQLite migration)
-
-Out of scope for v1 (deferred): CAPTCHA / SSO / 2FA login, low-level `browser_*` MCP tools, additional site adapters beyond `school-bbs`, Chinese tokenizer FTS, background scheduler, multi-worker deployment, in-MCP search / cache-read tools (handled by `BBS_Database`).
+Out of scope for this repo (lives elsewhere):
+- MCP server (separate downstream project that imports this as a library)
+- Full-text / vector search and RAG
+- More site adapters beyond `school-bbs`
+- Background scheduler / multi-machine deployment
 
 ## Privacy
 
-- No URLs, usernames, or passwords are committed to source. `.env` is gitignored.
-- Logger redacts known credentials at write time.
-- `storageState.json` (cookies) is permissioned 0600 (best-effort on Windows) and stays out of git.
+- `.env`, `./.state/`, `./.logs/`, `./.data/` are gitignored
+- pino logger automatically redacts strings registered via `addRedactedSecret(...)` — `AuthManager` registers credentials at first-login time
+- Credential cache uses AES-256-GCM with a hostname-derived key by default; pin via `CRED_KEY` for portability between machines
+- `storageState.json` (cookies) is permissioned 0600 (best-effort on Windows)
 
 ## License
 
