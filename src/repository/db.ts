@@ -149,8 +149,11 @@ CREATE TABLE IF NOT EXISTS daily_traffic (
   today_posts   INTEGER,
   threads       INTEGER,
   posts         INTEGER,
+  snapshot_at   TEXT,
   UNIQUE (board_node_id, date)
 );
+
+CREATE INDEX IF NOT EXISTS idx_daily_traffic_date ON daily_traffic(date);
 `;
 
 // ---------------------------------------------------------------------------
@@ -172,6 +175,16 @@ export class SQLiteDb implements Db {
   /** Idempotent schema application. Called once when the file is first opened. */
   applySchema(schemaSql: string): void {
     this._db.exec(schemaSql);
+  }
+
+  /** Synchronous read for setup/migration code (PRAGMA, etc.). */
+  rawAll<T = Record<string, unknown>>(sql: string): T[] {
+    return this._db.prepare(sql).all() as T[];
+  }
+
+  /** Synchronous exec for setup/migration code. */
+  rawExec(sql: string): void {
+    this._db.exec(sql);
   }
 
   private convertParams(sql: string, params?: unknown[]): { sql: string; params: Record<string, unknown> } {
@@ -281,8 +294,20 @@ export function getForumDb(dbFile: string): SQLiteDb {
 
   const db = new SQLiteDb(normalized);
   db.applySchema(FORUM_SCHEMA);
+  ensureDailyTrafficColumns(db);
   forumDbCache.set(dbFile, db);
   return db;
+}
+
+/**
+ * Idempotent ALTER for forum dbs created before snapshot_at existed.
+ * SQLite has no "ADD COLUMN IF NOT EXISTS", so we inspect table_info first.
+ */
+function ensureDailyTrafficColumns(db: SQLiteDb): void {
+  const cols = db.rawAll<{ name: string }>(`PRAGMA table_info(daily_traffic)`);
+  if (!cols.some((c) => c.name === 'snapshot_at')) {
+    db.rawExec(`ALTER TABLE daily_traffic ADD COLUMN snapshot_at TEXT`);
+  }
 }
 
 /** Closes all open dbs and resets singletons. Idempotent. */

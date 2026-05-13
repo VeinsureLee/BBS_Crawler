@@ -20,6 +20,7 @@ import { initDbs, closeDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { listTopLevelSections, upsertSection } from '../../src/repository/sections';
 import { upsertBoard } from '../../src/repository/boards';
+import { upsertDailyTraffic } from '../../src/repository/daily-traffic';
 import { logger } from '../../src/util/logger';
 
 function sleep(ms: number): Promise<void> {
@@ -48,7 +49,7 @@ async function crawlSectionRecursive(
   let subCount = 0;
 
   for (const b of children.boards) {
-    await upsertBoard({
+    const { boardId } = await upsertBoard({
       siteKey,
       boardKey: b.boardKey,
       name: b.name,
@@ -56,6 +57,7 @@ async function crawlSectionRecursive(
       moderators: b.moderators,
       stats: b.stats,
     });
+    await upsertDailyTraffic(boardId, b.stats);
     boardCount++;
   }
 

@@ -22,6 +22,9 @@ import {
 } from '../repository/boards';
 import { upsertThread } from '../repository/threads';
 import { upsertPosts } from '../repository/posts';
+import { upsertDailyTraffic } from '../repository/daily-traffic';
+import { findBoardByName } from '../repository/boards-lookup';
+import { getStructureDb } from '../repository/db';
 import { loadSiteConfig, loadSiteEntries, validateConfigConsistency } from './site-config';
 
 function sleep(ms: number): Promise<void> {
@@ -99,10 +102,11 @@ export async function runInitBoards(
   for (const sec of targets) {
     const children = await adapter.listSectionChildren(page, sec.sectionKey);
     for (const b of children.boards) {
-      await upsertBoard({
+      const { boardId } = await upsertBoard({
         siteKey, boardKey: b.boardKey, name: b.name,
         sectionId: sec.id, moderators: b.moderators, stats: b.stats,
       });
+      await upsertDailyTraffic(boardId, b.stats);
     }
     for (const sub of children.subSections) {
       const { sectionId } = await upsertSection({
@@ -111,10 +115,11 @@ export async function runInitBoards(
       await sleep(interval);
       const nested = await adapter.listSectionChildren(page, sub.sectionKey);
       for (const b of nested.boards) {
-        await upsertBoard({
+        const { boardId } = await upsertBoard({
           siteKey, boardKey: b.boardKey, name: b.name,
           sectionId, moderators: b.moderators, stats: b.stats,
         });
+        await upsertDailyTraffic(boardId, b.stats);
       }
     }
     await sleep(interval);
@@ -164,4 +169,123 @@ export async function runInitPinned(
     }
     logger.info({ siteKey, board: board.boardKey, count: ids.length }, 'init: pinned threads persisted');
   }
+}
+
+export interface RefreshBoardStatsOpts {
+  /** Refresh every board under one section (one HTTP request per section). */
+  sectionKey?: string;
+  /**
+   * Refresh stats for a single board. The crawler still has to fetch the
+   * board's parent section page (that's where the numbers live), so all
+   * sibling boards under the same parent are refreshed as a side effect.
+   */
+  boardName?: string;
+  /**
+   * Refresh every section that owns at least one board. Visits each parent
+   * section page exactly once.
+   */
+  all?: boolean;
+}
+
+export interface RefreshBoardStatsResult {
+  sectionsVisited: number;
+  boardsUpdated: number;
+}
+
+/**
+ * Lightweight refresh of `nodes.stats` + `daily_traffic` for boards under one
+ * or more parent sections. Does NOT crawl threads. Each section page is the
+ * source for `online / today / threads / posts`, so the API surface is
+ * parent-section-oriented even when the caller specifies a single board.
+ */
+export async function runRefreshBoardStats(
+  page: Page,
+  siteKey: string,
+  opts: RefreshBoardStatsOpts,
+): Promise<RefreshBoardStatsResult> {
+  const adapter = getAdapter(siteKey);
+  if (!adapter.listSectionChildren) {
+    throw new Error(`Adapter ${siteKey} has no listSectionChildren`);
+  }
+  const cfg = loadSiteConfig(siteKey);
+  const interval = cfg.crawl.structureRequestIntervalMs;
+
+  const targets = await resolveRefreshTargets(siteKey, opts);
+  let boardsUpdated = 0;
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i]!;
+    const children = await adapter.listSectionChildren(page, t.sectionKey);
+    for (const b of children.boards) {
+      const { boardId } = await upsertBoard({
+        siteKey,
+        boardKey: b.boardKey,
+        name: b.name,
+        sectionId: t.sectionId,
+        moderators: b.moderators,
+        stats: b.stats,
+      });
+      await upsertDailyTraffic(boardId, b.stats);
+      boardsUpdated++;
+    }
+    logger.info(
+      { siteKey, sectionKey: t.sectionKey, boards: children.boards.length },
+      'refresh: section stats persisted',
+    );
+    if (i < targets.length - 1) await sleep(interval);
+  }
+  return { sectionsVisited: targets.length, boardsUpdated };
+}
+
+interface RefreshTarget { sectionId: number; sectionKey: string; }
+
+async function resolveRefreshTargets(
+  siteKey: string,
+  opts: RefreshBoardStatsOpts,
+): Promise<RefreshTarget[]> {
+  const flags = [opts.sectionKey, opts.boardName, opts.all].filter(Boolean).length;
+  if (flags === 0) {
+    throw new Error('runRefreshBoardStats: pass one of { sectionKey, boardName, all }');
+  }
+  if (flags > 1) {
+    throw new Error('runRefreshBoardStats: pass exactly one of { sectionKey, boardName, all }');
+  }
+
+  const db = getStructureDb();
+
+  if (opts.sectionKey) {
+    const r = await db.query<{ id: number; node_key: string }>(
+      `SELECT id, node_key FROM nodes
+        WHERE site_key = $1 AND node_key = $2 AND type IN ('forum','sub_forum')
+        LIMIT 1`,
+      [siteKey, opts.sectionKey],
+    );
+    const row = r.rows[0];
+    if (!row) throw new Error(`section "${opts.sectionKey}" not found in ${siteKey}`);
+    return [{ sectionId: Number(row.id), sectionKey: row.node_key }];
+  }
+
+  if (opts.boardName) {
+    const board = await findBoardByName(siteKey, opts.boardName);
+    if (!board) throw new Error(`board "${opts.boardName}" not found in ${siteKey}`);
+    const r = await db.query<{ id: number; node_key: string }>(
+      `SELECT p.id, p.node_key FROM nodes b
+         JOIN nodes p ON p.id = b.parent_id
+        WHERE b.id = $1`,
+      [board.id],
+    );
+    const row = r.rows[0];
+    if (!row) throw new Error(`board "${opts.boardName}" has no parent section`);
+    return [{ sectionId: Number(row.id), sectionKey: row.node_key }];
+  }
+
+  // opts.all — every section that owns at least one board, visited once.
+  const r = await db.query<{ id: number; node_key: string }>(
+    `SELECT DISTINCT p.id, p.node_key
+       FROM nodes b
+       JOIN nodes p ON p.id = b.parent_id
+      WHERE b.site_key = $1 AND b.type = 'board'
+      ORDER BY p.id`,
+    [siteKey],
+  );
+  return r.rows.map((row) => ({ sectionId: Number(row.id), sectionKey: row.node_key }));
 }

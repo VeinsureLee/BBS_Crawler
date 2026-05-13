@@ -41,7 +41,16 @@ export type {
 } from './core/crawler-service';
 export { InitOrchestrator } from './core/init-orchestrator';
 export type { InitOrchestratorDeps } from './core/init-orchestrator';
-export { runInitSections, runInitBoards, runInitPinned } from './core/init-runners';
+export {
+  runInitSections,
+  runInitBoards,
+  runInitPinned,
+  runRefreshBoardStats,
+} from './core/init-runners';
+export type {
+  RefreshBoardStatsOpts,
+  RefreshBoardStatsResult,
+} from './core/init-runners';
 export { AuthManager } from './core/auth-manager';
 export { BrowserPool } from './core/browser-pool';
 export { createRateLimiter } from './core/rate-limiter';
@@ -95,6 +104,13 @@ export type { UpsertThreadResult, ThreadExistsResult, FetchSkippedResult, Upsert
 export { upsertPosts } from './repository/posts';
 export { getBoardCrawlState, upsertBoardCrawlState } from './repository/board-crawl-state';
 export type { BoardCrawlState, UpsertBoardCrawlStateInput } from './repository/board-crawl-state';
+export {
+  upsertDailyTraffic,
+  getDailyTrafficForDate,
+  getLatestDailyTraffic,
+  beijingDate,
+} from './repository/daily-traffic';
+export type { DailyTrafficRow } from './repository/daily-traffic';
 export { appendFetchLog } from './repository/fetch-log';
 export type { FetchLogRow, FetchLogStatus } from './repository/fetch-log';
 export { findBoardByName, getBoardById } from './repository/boards-lookup';
