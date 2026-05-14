@@ -2,7 +2,7 @@
 
 A Playwright-based forum crawler that persists posts into a layered SQLite store and exposes a TypeScript library for downstream consumers. The data-ingestion layer of the **BBS Agent of BYR** project.
 
-> Status: **Phase 3 landed** — layered per-forum SQLite storage, config-driven init, recursive node tree, hardened init pipeline. `school-bbs` adapter is complete. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
+> Status: **Phase 3 landed + thread-table split** — layered per-forum SQLite storage with separate `pinned_*` / `plain_*` tables, config-driven init, recursive node tree, hardened init pipeline. `school-bbs` adapter is complete. See [`Readme_ch.md`](Readme_ch.md) for the Chinese version.
 
 > This project is **not an MCP service**. It's a TypeScript library + CLI scripts. The MCP server lives in a separate downstream project that imports this as a dependency. See [`.shadow/README.md`](.shadow/README.md) for the project's design rationale.
 
@@ -15,7 +15,7 @@ A Playwright-based forum crawler that persists posts into a layered SQLite store
 - **Config-driven init**: top-level forums and node shapes are declared in `config/sites/<siteKey>.entries.yml` and `<siteKey>.node-types.yml` — the homepage HTML is no longer the source of truth.
 - Login flow with `storageState` persistence + optional encrypted credential cache (AES-256-GCM) so cookie expiry never forces a manual re-login.
 - Per-board incremental crawl state (`board_crawl_state.last_thread_posted_at` watermark) so consumers only fetch what's new.
-- Structured logging via pino multistream (stdout + daily-rotated `.logs/app/app-<date>.log`).
+- Structured logging via pino multistream (stdout + daily-rotated `.logs/app/app-<date>.log`). Long-running scripts like `init:threads` render their own in-place TUI and silence pino's stdout sink (file log is unaffected).
 
 ## What it doesn't do
 
@@ -57,15 +57,22 @@ cp .env.example .env
 npm run login
 
 # 4. initialize forum structure
-npm run init:sections          # top-level forums (entries.yml first, fallback to homepage)
-npm run init:boards            # boards + sub-forums
-npm run init:pinned -- --concurrency 8       # use 8 (not the default 16) to be safe on chrome memory
+npm run init:sections                          # top-level forums (entries.yml first, fallback to homepage)
+npm run init:boards                            # boards + sub-forums
+npm run init:threads -- --concurrency 8        # pinned threads (default). use 8 (not the default 16) to be safe on chrome memory
+# or, also crawl the first page of non-pinned threads in one pass:
+npm run init:threads -- --concurrency 8 --with-plain
 
 # 5. (optional) watch live progress in another terminal
-Get-Content .logs/app/app-*.log -Wait -Tail 0 |
-  Select-String '"stage":"progress' |
-  ForEach-Object { ($_ | ConvertFrom-Json).msg }
+npm run tail:progress
 ```
+
+`tail:progress` follows the latest `.logs/app/app-<date>.log`, filters
+`progress.tick` / `progress.final` lines, and renders a multi-line block
+(summary + per-forum breakdown) that **refreshes in place** when the
+terminal is a TTY (ANSI cursor-up + clear). When piped to a file or
+non-TTY pipe, it falls back to plain line-mode. Auto-handles day
+rollover. No PowerShell `Select-String` / `ConvertFrom-Json` quirks.
 
 After step 4 your data layout looks like:
 
@@ -73,11 +80,18 @@ After step 4 your data layout looks like:
 .data/
   structure.db              sites + nodes (recursive tree) + fetch_log
   forums/
-    本站站务.db                threads + posts + board_crawl_state + daily_traffic
+    本站站务.db                pinned_threads + pinned_posts
+                            + plain_threads  + plain_posts
+                            + board_crawl_state + daily_traffic
     校园生活.db
     学术科技.db
     ...
 ```
+
+Each forum db keeps pinned (sticky) threads and plain (regular) threads in
+separate tables. A given URL lives in exactly one of them — when a thread's
+sticky status flips between crawls, the upsert path deletes the row from
+the opposite table (cascading its posts) before writing the new row.
 
 The `npm run login` flow asks `Remember password? (y/N)`. Choosing `y` writes encrypted credentials to `./.state/<siteKey>.credentials.enc` (AES-256-GCM, mode 0600). When cookies later expire, the AuthManager auto-relogins from the cache.
 
@@ -90,7 +104,7 @@ The project is consumed as a TypeScript library. Public surface in [`src/index.t
 | **Database** | `initDb`, `getStructureDb`, `getForumDb`, `closeAllDbs`, `STRUCTURE_SCHEMA`, `FORUM_SCHEMA` |
 | **Sites / nodes** | `upsertSite`, `upsertSection`, `hasSections`, `listTopLevelSections`, `sectionsMissingBoards` |
 | **Boards** | `upsertBoard`, `listBoards`, `boardsMissingPinned`, `findBoardByName`, `getBoardById`, `resolveBoardRoute`, `findForumDbFileForBoard` |
-| **Threads / posts** | `upsertThread`, `upsertThreadSummary`, `upsertPosts`, `checkThreadExists`, `getCrawledThreadUrls`, `shouldSkipFetch` |
+| **Threads / posts** | `upsertPinnedThread`, `upsertPlainThread`, `upsertPinnedThreadSummary`, `upsertPlainThreadSummary`, `upsertPinnedPosts`, `upsertPlainPosts`, `checkThreadExists`, `getCrawledThreadUrls`, `shouldSkipFetch` (all kind-aware) |
 | **Crawl orchestration** | `CrawlerService`, `InitOrchestrator`, `runInitSections` / `runInitBoards` / `runInitPinned`, `BrowserPool`, `AuthManager`, `createRateLimiter` |
 | **Audit / state** | `appendFetchLog`, `getBoardCrawlState`, `upsertBoardCrawlState` |
 | **Adapter** | `getAdapter`, `listAdapters` |
@@ -102,7 +116,8 @@ Typical flow for a downstream MCP-style consumer:
 ```typescript
 import {
   initDb, parseConfig, BrowserPool, AuthManager, createRateLimiter,
-  CrawlerService, getAdapter, upsertThread, upsertPosts, appendFetchLog,
+  CrawlerService, getAdapter,
+  upsertPlainThread, upsertPlainPosts, appendFetchLog,
 } from 'bbs-crawler';
 import 'bbs-crawler/dist/adapters';   // side-effect: register adapters
 
@@ -114,9 +129,11 @@ const crawler = new CrawlerService({
   browserPool: new BrowserPool({ /* ... */ }),
   auth: new AuthManager({ /* ... */ }),
   registry: { getAdapter },
+  // Plain (non-pinned) threads. For pinned threads, swap in
+  // upsertPinnedThread / upsertPinnedPosts.
   persistThread: async (siteKey, thread) => {
-    const { threadId, forumDb } = await upsertThread(siteKey, thread);
-    await upsertPosts(forumDb, threadId, thread.posts);
+    const { threadId, forumDb } = await upsertPlainThread(siteKey, thread);
+    await upsertPlainPosts(forumDb, threadId, thread.posts);
     return threadId;
   },
   appendFetchLog,
@@ -140,6 +157,7 @@ All secrets in `.env` (gitignored). All forum-structure config in `config/sites/
 | `LOG_DIR` | `./.logs` | pino file sink root |
 | `LOG_LEVEL` | `info` | `debug` for verbose |
 | `LOG_FILE_DISABLED` | `false` | Set `true` to skip file sink (auto-disabled under `NODE_ENV=test`) |
+| `LOG_STDOUT_DISABLED` | `false` | Set `true` to silence pino's stdout sink. `init:threads` flips this on automatically so its TUI has the terminal to itself; you generally don't need to set it manually |
 | `BROWSER_HEADLESS` | `true` | `false` to watch Chrome live |
 | `BROWSER_EXECUTABLE_PATH` | (Playwright bundled) | Pin to your local Chrome binary |
 | `BROWSER_USER_AGENT` | (default) | Override UA string |
@@ -172,8 +190,8 @@ Per-site YAML lives under `config/sites/`:
 |---|---|
 | `npm run init:sections [siteKey]` | Persist top-level forums (`entries.yml` first, falls back to homepage) |
 | `npm run init:boards [siteKey]` | Recursively crawl each forum's section + board structure (cycle-safe) |
-| `npm run init:pinned [siteKey] [--concurrency N] [--limit N] [--skip-done] [--help]` | Crawl pinned threads with per-forum progress reporter and browser-dead detection |
-| `npm run init` | Run all three sequentially |
+| `npm run init:threads [siteKey] [--concurrency N] [--limit N] [--with-plain] [--skip-done] [--verbose]` | Crawl pinned threads (default). `--with-plain` also crawls page 1 of non-pinned threads (each thread truncated to its first page). Terminal shows an in-place refreshing progress block; `--verbose` adds a scrolling per-board event log above. File logs always contain full per-step detail. |
+| `npm run init` | Run all three sequentially (pinned only — pass `--with-plain` to init:threads manually for plain coverage) |
 | `npm run init:export [siteKey] [outputPath]` | Export forum structure to JSON |
 
 ### Crawl
@@ -188,7 +206,7 @@ Per-site YAML lives under `config/sites/`:
 | Script | Purpose |
 |---|---|
 | `npm run db:check [siteKey]` | Health check: list tables in `structure.db` + every `forums/*.db` with row counts |
-| `npm run db:migrate:layered -- [--dry-run] [--source ./old] [--target ./.data] [--yes]` | One-shot migration from legacy two-database layout (`structure.db` + `content.db`) to the new layered layout (per-forum `.db` files) |
+| `npm run db:migrate:split-threads -- [--dry-run] [--data-dir ./.data] [--yes]` | One-shot migration from the single `threads` + `posts` tables to the split `pinned_threads` / `pinned_posts` / `plain_threads` / `plain_posts` layout. Backs up each `forums/*.db` to `<file>.bak` before rewriting. Idempotent. |
 
 ### Debug
 | Script | Purpose |
@@ -203,6 +221,7 @@ Per-site YAML lives under `config/sites/`:
 |---|---|
 | `npm run explore` | General exploration utility |
 | `npm run format:html <file>` | Pretty-print raw HTML for offline analysis |
+| `npm run tail:progress` | Follow the latest app log and render `progress.tick` / `progress.final` as a multi-line block that refreshes in place (ANSI cursor-up). Non-TTY pipes fall back to line-mode. |
 
 ## Adding a new site
 
@@ -229,12 +248,12 @@ config/
   sites/               per-site YAML config
 scripts/
   auth/                do-login, login-once
-  init/                init-sections, init-boards, init-pinned, export-structure
+  init/                init-sections, init-boards, init-threads, init-ui (TUI), export-structure
   crawl/               crawl-board, crawl-section, crawl-pinned, crawl-board-with-skip,
                        crawl-forum-structure
-  db/                  check-db, migrate-to-layered
+  db/                  check-db, migrate-split-threads
   debug/               debug-board, explore-failed-boards, smoke-precheck, check-cycles, ...
-  util/                explore, format-html
+  util/                explore, format-html, tail-progress
 tests/
   unit/                vitest suites for core, repository, util, adapter
 .shadow/               Chinese design documentation (architecture, modules, workflows)
@@ -253,13 +272,16 @@ In-depth design docs in [`.shadow/`](.shadow/) (Chinese, accessible to non-devel
 
 ## Roadmap
 
-Done (Phase 1–3):
-- pino multistream + daily-rotated app log + redaction
+Done (Phase 1–3 + split):
+- pino multistream + daily-rotated app log + redaction (`LOG_STDOUT_DISABLED` lets long-running CLIs silence stdout without touching the file sink)
 - Config-driven init via `entries.yml` + `node-types.yml`
 - Layered SQLite storage (per-forum `.db`), nodes recursive tree, auto-applied schema, depth-bounded cycle-safe CTE walks
-- One-shot migration script (`db:migrate:layered`) with `--dry-run`, atomic rename, backup
-- `init-pinned` hardening: per-forum progress reporter (every 5s), browser-dead detection + graceful exit, `--skip-done` resume, strict CLI parsing
+- Split `threads` → `pinned_threads` / `plain_threads` (and matching `*_posts`); cross-table move on identity flip. Migration script `db:migrate:split-threads`.
+- Merged `init:pinned` + `init:plain` into `init:threads` (default pinned-only; `--with-plain` adds page-1 non-pinned crawl)
+- `init:threads` has a dedicated TUI: in-place refreshing progress block + per-forum table; `--verbose` adds a scrolling per-board event log. Per-thread errors are caught and skipped so one bad URL no longer fails the whole board.
+- Per-forum progress reporter (every 5s, also emitted to file log so `tail:progress` works in another window), browser-dead detection + graceful exit, `--skip-done` resume, strict CLI parsing
 - `init-boards` cycle protection: `visited` set + skip-self-children
+- Cross-platform `tail:progress` (replaces the brittle PowerShell `Select-String` / `ConvertFrom-Json` one-liner)
 - Removed dead pg-mem tests, `search.ts`, legacy migration framework
 
 Out of scope for this repo (lives elsewhere):
