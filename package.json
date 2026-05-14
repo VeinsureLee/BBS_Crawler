@@ -22,13 +22,13 @@
 
     "init:sections": "tsx scripts/init/init-sections.ts",
     "init:boards": "tsx scripts/init/init-boards.ts",
-    "init:pinned": "tsx scripts/init/init-pinned.ts",
-    "init": "npm run init:sections && npm run init:boards && npm run init:pinned",
+    "init:threads": "tsx scripts/init/init-threads.ts",
+    "init": "npm run init:sections && npm run init:boards && npm run init:threads",
     "init:export": "tsx scripts/init/export-structure.ts",
     "refresh:stats": "tsx scripts/init/refresh-board-stats.ts",
 
     "db:check": "tsx scripts/db/check-db.ts",
-    "db:migrate:layered": "tsx scripts/db/migrate-to-layered.ts",
+    "db:migrate:split-threads": "tsx scripts/db/migrate-split-threads.ts",
 
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
@@ -39,7 +39,8 @@
     "debug:failed-boards": "tsx scripts/debug/explore-failed-boards.ts",
 
     "explore": "tsx scripts/util/explore.ts",
-    "format:html": "tsx scripts/util/format-html.ts"
+    "format:html": "tsx scripts/util/format-html.ts",
+    "tail:progress": "tsx scripts/util/tail-progress.ts"
   },
   "dependencies": {
     "@types/js-yaml": "^4.0.9",

@@ -20,8 +20,8 @@ import { createRateLimiter } from '../../src/core/rate-limiter';
 import { AuthManager } from '../../src/core/auth-manager';
 import { CrawlerService } from '../../src/core/crawler-service';
 import { getAdapter } from '../../src/core/registry';
-import { upsertThread } from '../../src/repository/threads';
-import { upsertPosts } from '../../src/repository/posts';
+import { upsertPlainThread } from '../../src/repository/threads';
+import { upsertPlainPosts } from '../../src/repository/posts';
 import { appendFetchLog } from '../../src/repository/fetch-log';
 import { addRedactedSecret, logger } from '../../src/util/logger';
 import { shouldSkipFetch, getCrawledThreadUrls } from '../../src/repository/threads';
@@ -72,8 +72,8 @@ async function main() {
     auth,
     registry: { getAdapter },
     persistThread: async (siteKey, thread) => {
-      const { threadId, forumDb } = await upsertThread(siteKey, thread);
-      await upsertPosts(forumDb, threadId, thread.posts);
+      const { threadId, forumDb } = await upsertPlainThread(siteKey, thread);
+      await upsertPlainPosts(forumDb, threadId, thread.posts);
       return threadId;
     },
     appendFetchLog,
@@ -90,8 +90,8 @@ async function main() {
 
     logger.info({ boardKey, found: listResult.results.length }, `首页发现 ${listResult.results.length} 帖`);
 
-    // Get already crawled URLs for quick filtering
-    const crawledUrls = await getCrawledThreadUrls('school-bbs', boardKey);
+    // Get already crawled URLs for quick filtering (plain table — this script only writes plain).
+    const crawledUrls = await getCrawledThreadUrls('school-bbs', boardKey, 'plain');
     logger.info({ boardKey, alreadyCrawled: crawledUrls.size }, `本版已爬 ${crawledUrls.size} 帖`);
 
     const toFetch = [];
@@ -100,6 +100,7 @@ async function main() {
         'school-bbs',
         boardKey,
         summary.url,
+        'plain',
         summary.replyCount,
         freshnessHours,
       );

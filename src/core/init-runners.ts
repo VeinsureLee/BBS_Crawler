@@ -20,8 +20,8 @@ import {
   upsertBoard,
   type BoardRow,
 } from '../repository/boards';
-import { upsertThread } from '../repository/threads';
-import { upsertPosts } from '../repository/posts';
+import { upsertPinnedThread } from '../repository/threads';
+import { upsertPinnedPosts } from '../repository/posts';
 import { upsertDailyTraffic } from '../repository/daily-traffic';
 import { findBoardByName } from '../repository/boards-lookup';
 import { getStructureDb } from '../repository/db';
@@ -129,9 +129,10 @@ export async function runInitBoards(
 
 /**
  * For each board in `boards`, fetch its pinned-thread ids, then fetch each
- * thread and persist with is_pinned=true. Sequential (no concurrency) — the
- * MCP-triggered path runs one board at a time so it stays predictable; the
- * standalone `init:pinned` script keeps its parallel implementation.
+ * thread and persist into `pinned_threads` + `pinned_posts`. Sequential
+ * (no concurrency) — the MCP-triggered path runs one board at a time so it
+ * stays predictable; the standalone `init:threads` script keeps its parallel
+ * implementation.
  */
 export async function runInitPinned(
   page: Page,
@@ -161,8 +162,8 @@ export async function runInitPinned(
           url, maxPages: cfg.crawl.maxPinnedThreadPages,
         });
         thread.raw = { ...(thread.raw ?? {}), pinned: true };
-        const { threadId, forumDb } = await upsertThread(siteKey, thread, { isPinned: true });
-        await upsertPosts(forumDb, threadId, thread.posts);
+        const { threadId, forumDb } = await upsertPinnedThread(siteKey, thread);
+        await upsertPinnedPosts(forumDb, threadId, thread.posts);
       } catch (e) {
         logger.warn({ siteKey, board: board.boardKey, articleId, err: String(e) }, 'init: pinned thread fetch failed; skipping');
       }

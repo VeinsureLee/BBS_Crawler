@@ -7,10 +7,14 @@
  *                       - fetch_log (API call audit)
  *
  *   forums/<key>.db     one file per top-level forum, with:
- *                       - threads (incl. is_pinned flag)
- *                       - posts (linked to threads via thread_id)
+ *                       - pinned_threads / pinned_posts  (sticky/top threads)
+ *                       - plain_threads  / plain_posts   (regular threads)
  *                       - board_crawl_state (per-board incremental progress)
  *                       - daily_traffic (per-board daily snapshots)
+ *
+ * A given URL lives in either `pinned_*` or `plain_*` — never both. The
+ * upsert functions in `repository/threads.ts` move the row across tables
+ * when a thread's sticky status flips between crawls.
  *
  * Forum dbs are opened lazily on first reference via `getForumDb(dbFile)`.
  * The path stored in structure.db's `nodes.db_file` is the source of truth
@@ -100,7 +104,7 @@ CREATE TABLE IF NOT EXISTS migrations (
   applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS threads (
+CREATE TABLE IF NOT EXISTS pinned_threads (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   board_node_id   INTEGER NOT NULL,
   url             TEXT NOT NULL,
@@ -111,18 +115,47 @@ CREATE TABLE IF NOT EXISTS threads (
   reply_count     INTEGER,
   view_count      INTEGER,
   raw             TEXT,
-  is_pinned       INTEGER NOT NULL DEFAULT 0,
   first_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
   last_fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (url)
 );
 
-CREATE INDEX IF NOT EXISTS idx_threads_board        ON threads(board_node_id, posted_at DESC);
-CREATE INDEX IF NOT EXISTS idx_threads_board_pinned ON threads(board_node_id, is_pinned, posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pinned_threads_board ON pinned_threads(board_node_id, posted_at DESC);
 
-CREATE TABLE IF NOT EXISTS posts (
+CREATE TABLE IF NOT EXISTS pinned_posts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  thread_id     INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+  thread_id     INTEGER NOT NULL REFERENCES pinned_threads(id) ON DELETE CASCADE,
+  floor         INTEGER NOT NULL,
+  author        TEXT NOT NULL,
+  posted_at     TEXT,
+  content_html  TEXT NOT NULL,
+  content_text  TEXT NOT NULL,
+  attachments   TEXT,
+  raw           TEXT,
+  UNIQUE (thread_id, floor)
+);
+
+CREATE TABLE IF NOT EXISTS plain_threads (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  board_node_id   INTEGER NOT NULL,
+  url             TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  author          TEXT,
+  posted_at       TEXT,
+  last_reply_at   TEXT,
+  reply_count     INTEGER,
+  view_count      INTEGER,
+  raw             TEXT,
+  first_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  last_fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_plain_threads_board ON plain_threads(board_node_id, posted_at DESC);
+
+CREATE TABLE IF NOT EXISTS plain_posts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id     INTEGER NOT NULL REFERENCES plain_threads(id) ON DELETE CASCADE,
   floor         INTEGER NOT NULL,
   author        TEXT NOT NULL,
   posted_at     TEXT,
@@ -162,14 +195,23 @@ CREATE INDEX IF NOT EXISTS idx_daily_traffic_date ON daily_traffic(date);
 
 export class SQLiteDb implements Db {
   private readonly _db: Database.Database;
+  private readonly _dbPath: string;
+  private _closed = false;
 
   constructor(dbPath: string) {
     if (dbPath !== ':memory:') {
       fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     }
+    this._dbPath = dbPath;
     this._db = new Database(dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
+    // Absorb any leftover -wal from a previous hard-kill so the file is empty
+    // by the time we start writing. The sidecar files themselves can only be
+    // removed on a clean close (see closeSync below).
+    if (dbPath !== ':memory:') {
+      try { this._db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best effort */ }
+    }
   }
 
   /** Idempotent schema application. Called once when the file is first opened. */
@@ -243,7 +285,27 @@ export class SQLiteDb implements Db {
   }
 
   async close(): Promise<void> {
-    this._db.close();
+    this.closeSync();
+  }
+
+  /**
+   * Synchronous close — safe to call from signal handlers where awaiting a
+   * Promise wouldn't run before process exit.
+   *
+   * Flushes the WAL, switches journal mode to DELETE so SQLite removes the
+   * -wal/-shm sidecar files, then closes the handle. Idempotent.
+   */
+  closeSync(): void {
+    if (this._closed) return;
+    this._closed = true;
+    try {
+      if (this._dbPath !== ':memory:' && this._db.open) {
+        try { this._db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* best effort */ }
+        try { this._db.pragma('journal_mode = DELETE'); } catch { /* best effort */ }
+      }
+    } finally {
+      try { this._db.close(); } catch { /* best effort */ }
+    }
   }
 }
 
@@ -268,7 +330,49 @@ export function initDb(config: DbConfig): SQLiteDb {
   structureDb_ = new SQLiteDb(dbPath);
   structureDb_.applySchema(STRUCTURE_SCHEMA);
   dataDir_ = config.dataDir;
+  registerExitHandlers();
   return structureDb_;
+}
+
+// ---------------------------------------------------------------------------
+// Process-level cleanup — close dbs on Ctrl+C / SIGTERM / unhandled errors so
+// SQLite's -wal/-shm sidecar files don't get left behind. Registered once;
+// repeated initDb() calls (and tests) are no-ops.
+// ---------------------------------------------------------------------------
+
+let exitHandlersRegistered = false;
+
+function closeAllDbsSync(): void {
+  for (const [, db] of forumDbCache) {
+    try { db.closeSync(); } catch { /* best effort */ }
+  }
+  forumDbCache.clear();
+  if (structureDb_) {
+    try { structureDb_.closeSync(); } catch { /* best effort */ }
+    structureDb_ = null;
+  }
+  dataDir_ = null;
+}
+
+function registerExitHandlers(): void {
+  if (exitHandlersRegistered) return;
+  exitHandlersRegistered = true;
+
+  const onSignal = (signal: NodeJS.Signals): void => {
+    closeAllDbsSync();
+    // Re-raise so the exit code reflects the signal. Removing our listener
+    // first means the default handler (terminate) takes over.
+    process.removeListener(signal, onSignal);
+    process.kill(process.pid, signal);
+  };
+
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  process.on('SIGHUP', onSignal);
+  // 'exit' fires synchronously for: natural completion, process.exit(), and
+  // after Node prints an uncaught exception. Only sync code runs here, which
+  // is fine because better-sqlite3 is sync underneath.
+  process.on('exit', closeAllDbsSync);
 }
 
 export function getStructureDb(): SQLiteDb {
@@ -312,15 +416,7 @@ function ensureDailyTrafficColumns(db: SQLiteDb): void {
 
 /** Closes all open dbs and resets singletons. Idempotent. */
 export async function closeAllDbs(): Promise<void> {
-  for (const [, db] of forumDbCache) {
-    try { await db.close(); } catch { /* best effort */ }
-  }
-  forumDbCache.clear();
-  if (structureDb_) {
-    try { await structureDb_.close(); } catch { /* best effort */ }
-    structureDb_ = null;
-  }
-  dataDir_ = null;
+  closeAllDbsSync();
 }
 
 /** Test-only — resets state without closing. Production code should not call this. */

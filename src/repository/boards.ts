@@ -39,7 +39,7 @@ export interface BoardRow {
  */
 export async function findForumDbFileForBoard(boardNodeId: number): Promise<string | null> {
   try {
-    logger.info({ boardNodeId }, '      findForumDbFileForBoard: recursive CTE 开始');
+    logger.debug({ boardNodeId }, '      findForumDbFileForBoard: recursive CTE 开始');
     const r = await getStructureDb().query<{ db_file: string | null }>(
       `WITH RECURSIVE up(node_id, depth) AS (
          SELECT $1, 0
@@ -55,7 +55,7 @@ export async function findForumDbFileForBoard(boardNodeId: number): Promise<stri
         LIMIT 1`,
       [boardNodeId],
     );
-    logger.info({ boardNodeId, dbFile: r.rows[0]?.db_file }, '      findForumDbFileForBoard: CTE 返回');
+    logger.debug({ boardNodeId, dbFile: r.rows[0]?.db_file }, '      findForumDbFileForBoard: CTE 返回');
     return r.rows[0]?.db_file ?? null;
   } catch (e) {
     throw new DatabaseError(`findForumDbFileForBoard failed for nodeId=${boardNodeId}`, e);
@@ -72,12 +72,12 @@ export async function resolveBoardRoute(
   boardKey: string,
 ): Promise<{ boardNodeId: number; forumDbFile: string }> {
   try {
-    logger.info({ siteKey, boardKey }, '    resolveBoardRoute: SELECT board id');
+    logger.debug({ siteKey, boardKey }, '    resolveBoardRoute: SELECT board id');
     const r = await getStructureDb().query<{ id: number }>(
       `SELECT id FROM nodes WHERE site_key = $1 AND node_key = $2 AND type = 'board'`,
       [siteKey, boardKey],
     );
-    logger.info({ rows: r.rows.length, firstId: r.rows[0]?.id }, '    resolveBoardRoute: SELECT 返回');
+    logger.debug({ rows: r.rows.length, firstId: r.rows[0]?.id }, '    resolveBoardRoute: SELECT 返回');
     const row = r.rows[0];
     if (!row) {
       throw new DatabaseError(`Board not found: ${siteKey}/${boardKey}`);
@@ -115,12 +115,13 @@ export async function listBoards(siteKey: string): Promise<BoardRow[]> {
 }
 
 /**
- * Boards that have zero pinned threads. Used by the init orchestrator to
- * resume init:pinned for boards that were skipped or failed previously.
+ * Boards that have zero rows in `pinned_threads`. Used by the init
+ * orchestrator to resume the pinned-thread crawl for boards that were
+ * skipped or failed previously.
  *
  * Implementation: groups boards by their ancestor forum, opens each forum db
- * once, queries `SELECT DISTINCT board_node_id FROM threads WHERE is_pinned=1`,
- * then returns boards not in the union of those sets.
+ * once, queries `SELECT DISTINCT board_node_id FROM pinned_threads`, then
+ * returns boards not in the union of those sets.
  */
 export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> {
   try {
@@ -168,7 +169,7 @@ export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> 
     for (const [dbFile, list] of byForum) {
       const forumDb = getForumDb(dbFile);
       const pinnedR = await forumDb.query<{ board_node_id: number }>(
-        `SELECT DISTINCT board_node_id FROM threads WHERE is_pinned = 1`,
+        `SELECT DISTINCT board_node_id FROM pinned_threads`,
       );
       const pinnedSet = new Set(pinnedR.rows.map((row) => Number(row.board_node_id)));
       for (const b of list) {

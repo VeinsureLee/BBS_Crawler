@@ -22,15 +22,17 @@ async function main(): Promise<void> {
       WHERE site_key = 'school-bbs' AND type = 'forum' AND db_file IS NOT NULL`,
   );
 
-  let nonPinnedTotal = 0;
+  let plainTotal = 0;
+  let pinnedTotal = 0;
   for (const f of forums.rows) {
     const forumDb = getForumDb(f.db_file);
-    const r = await forumDb.query<{ c: number }>(
-      `SELECT count(*) AS c FROM threads WHERE is_pinned = 0`,
-    );
-    nonPinnedTotal += r.rows[0]!.c;
+    const plain = await forumDb.query<{ c: number }>(`SELECT count(*) AS c FROM plain_threads`);
+    const pinned = await forumDb.query<{ c: number }>(`SELECT count(*) AS c FROM pinned_threads`);
+    plainTotal += plain.rows[0]!.c;
+    pinnedTotal += pinned.rows[0]!.c;
   }
-  console.log('Non-pinned threads in DB:', nonPinnedTotal);
+  console.log('Pinned threads in DB:', pinnedTotal);
+  console.log('Plain threads in DB:', plainTotal);
 
   await closeAllDbs();
 }

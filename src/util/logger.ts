@@ -41,8 +41,21 @@ function fileLoggingDisabled(): boolean {
   );
 }
 
+/**
+ * Stdout stream wrapper that re-reads `LOG_STDOUT_DISABLED` on every write.
+ * Used by CLI scripts that want to render their own TUI (e.g. init-threads)
+ * — they flip the env var at the top of main() and pino quietly drops to a
+ * no-op for stdout while continuing to write the file log normally.
+ */
+const conditionalStdout = {
+  write(data: string | Uint8Array): boolean {
+    if (process.env.LOG_STDOUT_DISABLED === 'true') return true;
+    return process.stdout.write(data);
+  },
+};
+
 function buildStreams(): StreamEntry[] {
-  const streams: StreamEntry[] = [{ stream: process.stdout }];
+  const streams: StreamEntry[] = [{ stream: conditionalStdout as unknown as NodeJS.WritableStream }];
   if (fileLoggingDisabled()) return streams;
 
   const filePath = appLogPath();

@@ -14,7 +14,7 @@ import {
   FetchFailedError,
 } from './errors';
 import { logger } from '../util/logger';
-import { shouldSkipFetch, upsertThreadSummary } from '../repository/threads';
+import { upsertPinnedThreadSummary, upsertPlainThreadSummary } from '../repository/threads';
 import { findBoardByName } from '../repository/boards-lookup';
 import { getBoardCrawlState, upsertBoardCrawlState } from '../repository/board-crawl-state';
 import type { InitOrchestrator } from './init-orchestrator';
@@ -181,9 +181,9 @@ export class CrawlerService {
    *     Pinned threads do NOT trigger the stop — they're not time-ordered.
    *   - 'pages': crawl exactly `pages` pages starting at cursor.startPage.
    *
-   * Always upserts the resulting summaries (is_pinned preserved via OR-merge)
-   * and updates board_crawl_state with the deepest page reached and the new
-   * watermark.
+   * Always upserts the resulting summaries — pinned rows go into
+   * `pinned_threads`, plain rows into `plain_threads`. The watermark in
+   * `board_crawl_state` tracks only the latest plain thread's posted_at.
    */
   async listThreadsByName(input: ListThreadsByNameInput): Promise<ListThreadsByNameOutput> {
     const board = await findBoardByName(input.siteKey, input.boardName);
@@ -241,9 +241,13 @@ export class CrawlerService {
     let newWatermark: string | null = watermark;
     for (const s of result.collected) {
       const isPinned = (s.raw as { isPinned?: boolean } | undefined)?.isPinned === true;
-      await upsertThreadSummary(input.siteKey, s, { isPinned });
-      if (!isPinned && s.postedAt && (newWatermark === null || s.postedAt > newWatermark)) {
-        newWatermark = s.postedAt;
+      if (isPinned) {
+        await upsertPinnedThreadSummary(input.siteKey, s);
+      } else {
+        await upsertPlainThreadSummary(input.siteKey, s);
+        if (s.postedAt && (newWatermark === null || s.postedAt > newWatermark)) {
+          newWatermark = s.postedAt;
+        }
       }
     }
     const lastCrawledAt = new Date().toISOString();

@@ -99,9 +99,22 @@ export {
   findForumDbFileForBoard,
 } from './repository/boards';
 export type { UpsertBoardInput, UpsertBoardResult, BoardRow } from './repository/boards';
-export { upsertThread, upsertThreadSummary, checkThreadExists, getCrawledThreadUrls, shouldSkipFetch } from './repository/threads';
-export type { UpsertThreadResult, ThreadExistsResult, FetchSkippedResult, UpsertThreadOptions } from './repository/threads';
-export { upsertPosts } from './repository/posts';
+export {
+  upsertPinnedThread,
+  upsertPlainThread,
+  upsertPinnedThreadSummary,
+  upsertPlainThreadSummary,
+  checkThreadExists,
+  getCrawledThreadUrls,
+  shouldSkipFetch,
+} from './repository/threads';
+export type {
+  ThreadKind,
+  UpsertThreadResult,
+  ThreadExistsResult,
+  FetchSkippedResult,
+} from './repository/threads';
+export { upsertPinnedPosts, upsertPlainPosts } from './repository/posts';
 export { getBoardCrawlState, upsertBoardCrawlState } from './repository/board-crawl-state';
 export type { BoardCrawlState, UpsertBoardCrawlStateInput } from './repository/board-crawl-state';
 export {
