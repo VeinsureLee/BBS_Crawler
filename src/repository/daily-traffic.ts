@@ -1,14 +1,15 @@
 /**
- * Per-board daily stats snapshots. Lives in the forum db the board belongs to,
+ * Per-board daily stats snapshots. Lives in the board db the row belongs to,
  * keyed by (board_node_id, date). Date is bucketed in Asia/Shanghai (UTC+8)
  * because the forum's "today" counter is reset at Beijing midnight.
  *
  * Same-day refreshes overwrite the row — the table stores the **last** snapshot
- * of each day, not a per-call history.
+ * of each day, not a per-call history. This is also the **only** place stats
+ * are persisted; `nodes` no longer carries a `stats` column.
  */
-import { getForumDb, type Db } from './db';
+import { getBoardDb, type Db } from './db';
 import { DatabaseError } from '../core/errors';
-import { findForumDbFileForBoard } from './boards';
+import { findBoardDbPath } from './boards';
 import type { BoardStats } from '../core/site-adapter';
 
 export interface DailyTrafficRow {
@@ -21,12 +22,12 @@ export interface DailyTrafficRow {
   snapshotAt: string | null;
 }
 
-async function forumDbForBoard(boardNodeId: number): Promise<Db> {
-  const dbFile = await findForumDbFileForBoard(boardNodeId);
-  if (!dbFile) {
-    throw new DatabaseError(`No ancestor forum (with db_file) for board node ${boardNodeId}`);
+async function boardDbFor(boardNodeId: number): Promise<Db> {
+  const dbPath = await findBoardDbPath(boardNodeId);
+  if (!dbPath) {
+    throw new DatabaseError(`No db_path for board node ${boardNodeId}`);
   }
-  return getForumDb(dbFile);
+  return getBoardDb(dbPath);
 }
 
 /**
@@ -38,7 +39,6 @@ export function beijingDate(iso: string): string {
   if (!Number.isFinite(t)) {
     throw new DatabaseError(`beijingDate: invalid ISO timestamp "${iso}"`);
   }
-  // Shift by +8h so UTC's calendar date equals Beijing's calendar date.
   const shifted = new Date(t + 8 * 60 * 60 * 1000);
   const y = shifted.getUTCFullYear();
   const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
@@ -56,9 +56,9 @@ export async function upsertDailyTraffic(
   stats: BoardStats,
 ): Promise<void> {
   try {
-    const forumDb = await forumDbForBoard(boardNodeId);
+    const boardDb = await boardDbFor(boardNodeId);
     const date = beijingDate(stats.snapshotAt);
-    await forumDb.query(
+    await boardDb.query(
       `INSERT INTO daily_traffic
          (board_node_id, date, online, today_posts, threads, posts, snapshot_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -112,8 +112,8 @@ export async function getDailyTrafficForDate(
   date: string,
 ): Promise<DailyTrafficRow | null> {
   try {
-    const forumDb = await forumDbForBoard(boardNodeId);
-    const r = await forumDb.query<RawDailyRow>(
+    const boardDb = await boardDbFor(boardNodeId);
+    const r = await boardDb.query<RawDailyRow>(
       `SELECT board_node_id, date, online, today_posts, threads, posts, snapshot_at
          FROM daily_traffic
         WHERE board_node_id = $1 AND date = $2`,
@@ -133,8 +133,8 @@ export async function getLatestDailyTraffic(
   boardNodeId: number,
 ): Promise<DailyTrafficRow | null> {
   try {
-    const forumDb = await forumDbForBoard(boardNodeId);
-    const r = await forumDb.query<RawDailyRow>(
+    const boardDb = await boardDbFor(boardNodeId);
+    const r = await boardDb.query<RawDailyRow>(
       `SELECT board_node_id, date, online, today_posts, threads, posts, snapshot_at
          FROM daily_traffic
         WHERE board_node_id = $1

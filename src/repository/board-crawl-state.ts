@@ -1,14 +1,14 @@
 /**
- * Per-board crawl progress (watermark + deepest page). Stored in the forum db
- * the board belongs to, keyed by `board_node_id` (structure.db.nodes.id).
+ * Per-board crawl progress (watermark + deepest page). Stored in the board db
+ * the row belongs to, keyed by `board_node_id` (structure.db.nodes.id).
  *
  * Used by listThreadsByName to:
  *   - resume incremental crawls (stop when posted_at <= latest_thread_posted_at)
  *   - report deepest page ever reached
  */
-import { getForumDb, type Db } from './db';
+import { getBoardDb, type Db } from './db';
 import { DatabaseError } from '../core/errors';
-import { findForumDbFileForBoard } from './boards';
+import { findBoardDbPath } from './boards';
 
 export interface BoardCrawlState {
   boardId: number;
@@ -26,18 +26,18 @@ export interface UpsertBoardCrawlStateInput {
   lastThreadKey?: string;
 }
 
-async function forumDbForBoard(boardNodeId: number): Promise<Db> {
-  const dbFile = await findForumDbFileForBoard(boardNodeId);
-  if (!dbFile) {
-    throw new DatabaseError(`No ancestor forum (with db_file) for board node ${boardNodeId}`);
+async function boardDbFor(boardNodeId: number): Promise<Db> {
+  const dbPath = await findBoardDbPath(boardNodeId);
+  if (!dbPath) {
+    throw new DatabaseError(`No db_path for board node ${boardNodeId}`);
   }
-  return getForumDb(dbFile);
+  return getBoardDb(dbPath);
 }
 
 export async function getBoardCrawlState(boardId: number): Promise<BoardCrawlState | null> {
   try {
-    const forumDb = await forumDbForBoard(boardId);
-    const r = await forumDb.query<{
+    const boardDb = await boardDbFor(boardId);
+    const r = await boardDb.query<{
       board_node_id: number;
       deepest_page_crawled: number;
       latest_thread_posted_at: string | null;
@@ -66,8 +66,8 @@ export async function getBoardCrawlState(boardId: number): Promise<BoardCrawlSta
 
 export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): Promise<void> {
   try {
-    const forumDb = await forumDbForBoard(input.boardId);
-    const exists = await forumDb.query<{
+    const boardDb = await boardDbFor(input.boardId);
+    const exists = await boardDb.query<{
       deepest_page_crawled: number;
       latest_thread_posted_at: string | null;
     }>(
@@ -90,7 +90,7 @@ export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): 
         }
       }
 
-      await forumDb.query(
+      await boardDb.query(
         `UPDATE board_crawl_state
             SET deepest_page_crawled    = $1,
                 latest_thread_posted_at = $2,
@@ -106,7 +106,7 @@ export async function upsertBoardCrawlState(input: UpsertBoardCrawlStateInput): 
         ],
       );
     } else {
-      await forumDb.query(
+      await boardDb.query(
         `INSERT INTO board_crawl_state
             (board_node_id, deepest_page_crawled, latest_thread_posted_at, last_crawled_at, last_thread_key)
          VALUES ($1, COALESCE($2, 0), $3, $4, $5)`,

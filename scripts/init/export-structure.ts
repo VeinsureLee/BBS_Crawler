@@ -10,7 +10,7 @@ import 'dotenv/config';
 import '../../src/adapters/index';
 import * as path from 'path';
 import { parseConfig } from '../../src/core/config';
-import { initDbs, closeDbs } from '../../src/repository/db';
+import { initDb, closeAllDbs } from '../../src/repository/db';
 import { exportForumStructure } from '../../src/export/exporter';
 import { logger } from '../../src/util/logger';
 
@@ -19,13 +19,13 @@ async function main() {
   const outputPath = process.argv[3] ?? path.join(process.cwd(), 'data', 'forum-structure.json');
 
   const cfg = parseConfig(process.env);
-  initDbs({ dataDir: cfg.dataDir });
+  initDb({ dataDir: cfg.dataDir });
 
   try {
     await exportForumStructure(siteKey, outputPath);
     logger.info({ siteKey, outputPath }, `论坛结构已导出至 ${outputPath}`);
   } finally {
-    await closeDbs();
+    await closeAllDbs();
   }
 }
 

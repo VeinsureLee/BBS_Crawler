@@ -1,16 +1,18 @@
 /**
  * Board nodes (type='board') — leaf containers that hold threads.
  *
- * After Phase 3, boards no longer have a dedicated table; they're stored as
- * rows in the unified `nodes` table in structure.db with `type = 'board'`.
- * Their detail data (moderators, stats) live as JSON columns on the same row.
- * Thread/post content lives in the forum-specific .db file referenced by the
- * board's ancestor forum node.
+ * Each board row owns its own `.db` file at the path stored in `nodes.db_path`,
+ * composed from the parent's `full_path` + `safeFileName(node_key) + '.db'`.
+ * Forum / sub_forum rows above don't own a file; they only contribute their
+ * `node_key` to the directory chain.
+ *
+ * Stats are no longer stored on the node row — daily_traffic (inside the
+ * board db) is the single source of truth for online / today / threads / posts.
  */
-import { getStructureDb, getForumDb } from './db';
+import { getStructureDb } from './db';
 import { DatabaseError } from '../core/errors';
 import { logger } from '../util/logger';
-import type { BoardStats } from '../core/site-adapter';
+import { safeFileName } from './sections';
 
 export interface UpsertBoardInput {
   siteKey: string;
@@ -19,10 +21,9 @@ export interface UpsertBoardInput {
   /** Immediate parent node id (forum or sub_forum). */
   sectionId?: number | null;
   moderators?: string[];
-  stats?: BoardStats;
 }
 
-export interface UpsertBoardResult { boardId: number; }
+export interface UpsertBoardResult { boardId: number; dbPath: string; }
 
 export interface BoardRow {
   id: number;
@@ -31,62 +32,47 @@ export interface BoardRow {
 }
 
 /**
- * Look up a board node's ancestor-forum db_file by walking up the parent chain.
- *
- * Cycle-safe: refuses to follow parent_id that equals current node (self-loop)
- * and caps depth at 20 — both guards exist because adapter-driven init can
- * corrupt `parent_id` if a section's page lists itself among its children.
+ * Find the relative `db_path` stored for a board node. Returns null when the
+ * node is missing or isn't a board.
  */
-export async function findForumDbFileForBoard(boardNodeId: number): Promise<string | null> {
+export async function findBoardDbPath(boardNodeId: number): Promise<string | null> {
   try {
-    logger.debug({ boardNodeId }, '      findForumDbFileForBoard: recursive CTE 开始');
-    const r = await getStructureDb().query<{ db_file: string | null }>(
-      `WITH RECURSIVE up(node_id, depth) AS (
-         SELECT $1, 0
-         UNION ALL
-         SELECT n.parent_id, u.depth + 1
-           FROM up u JOIN nodes n ON n.id = u.node_id
-          WHERE n.parent_id IS NOT NULL
-            AND n.parent_id <> u.node_id
-            AND u.depth < 20
-       )
-       SELECT n.db_file FROM up u JOIN nodes n ON n.id = u.node_id
-        WHERE n.type = 'forum'
-        LIMIT 1`,
+    const r = await getStructureDb().query<{ db_path: string | null; type: string }>(
+      `SELECT db_path, type FROM nodes WHERE id = $1`,
       [boardNodeId],
     );
-    logger.debug({ boardNodeId, dbFile: r.rows[0]?.db_file }, '      findForumDbFileForBoard: CTE 返回');
-    return r.rows[0]?.db_file ?? null;
+    const row = r.rows[0];
+    if (!row || row.type !== 'board') return null;
+    return row.db_path ?? null;
   } catch (e) {
-    throw new DatabaseError(`findForumDbFileForBoard failed for nodeId=${boardNodeId}`, e);
+    throw new DatabaseError(`findBoardDbPath failed for nodeId=${boardNodeId}`, e);
   }
 }
 
 /**
  * Find a board node by (siteKey, boardKey) and return its node id plus the
- * forum db_file it belongs to. Used by content repositories to figure out
- * "which forum db do I write to?". Throws if board or forum not found.
+ * `.db` file path it owns. Used by content repositories to figure out where
+ * to write. Throws if board or its db_path is missing.
  */
 export async function resolveBoardRoute(
   siteKey: string,
   boardKey: string,
-): Promise<{ boardNodeId: number; forumDbFile: string }> {
+): Promise<{ boardNodeId: number; dbPath: string }> {
   try {
-    logger.debug({ siteKey, boardKey }, '    resolveBoardRoute: SELECT board id');
-    const r = await getStructureDb().query<{ id: number }>(
-      `SELECT id FROM nodes WHERE site_key = $1 AND node_key = $2 AND type = 'board'`,
+    logger.debug({ siteKey, boardKey }, '    resolveBoardRoute: SELECT board');
+    const r = await getStructureDb().query<{ id: number; db_path: string | null }>(
+      `SELECT id, db_path FROM nodes
+        WHERE site_key = $1 AND node_key = $2 AND type = 'board'`,
       [siteKey, boardKey],
     );
-    logger.debug({ rows: r.rows.length, firstId: r.rows[0]?.id }, '    resolveBoardRoute: SELECT 返回');
     const row = r.rows[0];
     if (!row) {
       throw new DatabaseError(`Board not found: ${siteKey}/${boardKey}`);
     }
-    const dbFile = await findForumDbFileForBoard(Number(row.id));
-    if (!dbFile) {
-      throw new DatabaseError(`No ancestor forum (with db_file) for board ${siteKey}/${boardKey}`);
+    if (!row.db_path) {
+      throw new DatabaseError(`Board ${siteKey}/${boardKey} has no db_path (was it inserted before Layout-A migration?)`);
     }
-    return { boardNodeId: Number(row.id), forumDbFile: dbFile };
+    return { boardNodeId: Number(row.id), dbPath: row.db_path };
   } catch (e) {
     if (e instanceof DatabaseError) throw e;
     throw new DatabaseError(`resolveBoardRoute failed for ${siteKey}/${boardKey}`, e);
@@ -115,67 +101,39 @@ export async function listBoards(siteKey: string): Promise<BoardRow[]> {
 }
 
 /**
- * Boards that have zero rows in `pinned_threads`. Used by the init
- * orchestrator to resume the pinned-thread crawl for boards that were
- * skipped or failed previously.
+ * Boards whose `.db` file does not yet exist on disk — proxy for "we haven't
+ * crawled threads here yet". Used by the init orchestrator to resume.
  *
- * Implementation: groups boards by their ancestor forum, opens each forum db
- * once, queries `SELECT DISTINCT board_node_id FROM pinned_threads`, then
- * returns boards not in the union of those sets.
+ * Cheap because boards know their own db_path; no recursive CTE, no opening
+ * forum dbs.
  */
 export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> {
   try {
+    const { getDataDir } = await import('./db');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
     const r = await getStructureDb().query<{
-      id: number;
-      node_key: string;
-      name: string;
-      db_file: string;
+      id: number; node_key: string; name: string; db_path: string | null;
     }>(
-      `WITH RECURSIVE up(board_id, ancestor_id, depth) AS (
-         SELECT b.id, b.parent_id, 0 FROM nodes b
-          WHERE b.site_key = $1 AND b.type = 'board'
-         UNION ALL
-         SELECT u.board_id, n.parent_id, u.depth + 1
-           FROM up u JOIN nodes n ON n.id = u.ancestor_id
-          WHERE u.ancestor_id IS NOT NULL
-            AND n.parent_id <> u.ancestor_id
-            AND u.depth < 20
-       )
-       SELECT b.id, b.node_key, b.name, f.db_file
-         FROM nodes b
-         JOIN up u ON u.board_id = b.id
-         JOIN nodes f ON f.id = u.ancestor_id AND f.type = 'forum'
-        WHERE b.site_key = $1 AND b.type = 'board'
-        ORDER BY b.id`,
+      `SELECT id, node_key, name, db_path FROM nodes
+        WHERE site_key = $1 AND type = 'board'
+        ORDER BY id`,
       [siteKey],
     );
 
-    const boards = r.rows.map((row) => ({
-      id: Number(row.id),
-      boardKey: row.node_key,
-      name: row.name,
-      dbFile: row.db_file,
-    }));
-
-    // Group by forum db, query each once for pinned thread board_node_ids.
-    const byForum = new Map<string, typeof boards>();
-    for (const b of boards) {
-      const arr = byForum.get(b.dbFile) ?? [];
-      arr.push(b);
-      byForum.set(b.dbFile, arr);
-    }
-
+    const dataDir = getDataDir();
     const missing: BoardRow[] = [];
-    for (const [dbFile, list] of byForum) {
-      const forumDb = getForumDb(dbFile);
-      const pinnedR = await forumDb.query<{ board_node_id: number }>(
-        `SELECT DISTINCT board_node_id FROM pinned_threads`,
-      );
-      const pinnedSet = new Set(pinnedR.rows.map((row) => Number(row.board_node_id)));
-      for (const b of list) {
-        if (!pinnedSet.has(b.id)) {
-          missing.push({ id: b.id, boardKey: b.boardKey, name: b.name });
-        }
+    for (const row of r.rows) {
+      if (!row.db_path) {
+        missing.push({ id: Number(row.id), boardKey: row.node_key, name: row.name });
+        continue;
+      }
+      const abs = path.isAbsolute(row.db_path)
+        ? row.db_path
+        : path.join(dataDir, row.db_path);
+      if (!fs.existsSync(abs)) {
+        missing.push({ id: Number(row.id), boardKey: row.node_key, name: row.name });
       }
     }
     return missing;
@@ -186,7 +144,8 @@ export async function boardsMissingPinned(siteKey: string): Promise<BoardRow[]> 
 
 /**
  * Insert or update a board node. `sectionId` is the immediate parent node id
- * (forum or sub_forum). moderators/stats are stored as JSON on the node row.
+ * (forum or sub_forum). Computes `db_path` and `full_path` from the parent's
+ * full_path + safeFileName(boardKey). moderators is stored as JSON on the row.
  */
 export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardResult> {
   try {
@@ -194,16 +153,19 @@ export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardR
     if (input.sectionId == null) {
       throw new DatabaseError(`upsertBoard requires a parent sectionId (board ${input.boardKey})`);
     }
-    // Compute level from parent.
-    const parent = await db.query<{ level: number }>(
-      `SELECT level FROM nodes WHERE id = $1`,
+    const parent = await db.query<{ level: number; full_path: string | null }>(
+      `SELECT level, full_path FROM nodes WHERE id = $1`,
       [input.sectionId],
     );
-    const parentLevel = parent.rows[0]?.level;
-    if (parentLevel === undefined) {
+    const parentRow = parent.rows[0];
+    if (!parentRow) {
       throw new DatabaseError(`Parent node ${input.sectionId} not found`);
     }
-    const level = parentLevel + 1;
+    const level = parentRow.level + 1;
+    const safeBoard = safeFileName(input.boardKey);
+    const parentPath = parentRow.full_path ?? '';
+    const fullPath = parentPath ? `${parentPath}/${safeBoard}` : safeBoard;
+    const dbPath = `forums/${fullPath}.db`;
 
     const exists = await db.query<{ id: number }>(
       `SELECT id FROM nodes WHERE site_key = $1 AND node_key = $2`,
@@ -212,7 +174,6 @@ export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardR
 
     if (exists.rows.length > 0) {
       const id = exists.rows[0]!.id;
-      // Refuse self-loop.
       const safeParentId = input.sectionId === id ? null : input.sectionId;
       await db.query(
         `UPDATE nodes
@@ -220,37 +181,40 @@ export async function upsertBoard(input: UpsertBoardInput): Promise<UpsertBoardR
                 parent_id = COALESCE($2, parent_id),
                 type      = 'board',
                 level     = $3,
-                moderators = COALESCE($4, moderators),
-                stats     = COALESCE($5, stats),
+                full_path = $4,
+                db_path   = $5,
+                moderators = COALESCE($6, moderators),
                 last_crawled_at = datetime('now')
-          WHERE id = $6`,
+          WHERE id = $7`,
         [
           input.name,
           safeParentId,
           level,
+          fullPath,
+          dbPath,
           input.moderators ? JSON.stringify(input.moderators) : null,
-          input.stats ? JSON.stringify(input.stats) : null,
           id,
         ],
       );
-      return { boardId: id };
+      return { boardId: id, dbPath };
     }
     await db.query(
       `INSERT INTO nodes
-         (site_key, node_key, name, parent_id, type, level, moderators, stats, last_crawled_at)
-       VALUES ($1, $2, $3, $4, 'board', $5, $6, $7, datetime('now'))`,
+         (site_key, node_key, name, parent_id, type, level, full_path, db_path, moderators, last_crawled_at)
+       VALUES ($1, $2, $3, $4, 'board', $5, $6, $7, $8, datetime('now'))`,
       [
         input.siteKey,
         input.boardKey,
         input.name,
         input.sectionId,
         level,
+        fullPath,
+        dbPath,
         input.moderators ? JSON.stringify(input.moderators) : null,
-        input.stats ? JSON.stringify(input.stats) : null,
       ],
     );
     const r = await db.query<{ id: number }>(`SELECT last_insert_rowid() AS id`);
-    return { boardId: r.rows[0]!.id };
+    return { boardId: r.rows[0]!.id, dbPath };
   } catch (e) {
     if (e instanceof DatabaseError) throw e;
     throw new DatabaseError(`upsertBoard failed for ${input.siteKey}/${input.boardKey}`, e);

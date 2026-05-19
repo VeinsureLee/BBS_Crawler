@@ -6,7 +6,7 @@ import {
   initDb,
   closeAllDbs,
   getStructureDb,
-  getForumDb,
+  getBoardDb,
   _resetForTests,
 } from '../../../src/repository/db';
 import { upsertSite } from '../../../src/repository/sites';
@@ -19,18 +19,17 @@ import {
 import {
   upsertBoard,
   resolveBoardRoute,
-  findForumDbFileForBoard,
+  findBoardDbPath,
   listBoards,
   boardsMissingPinned,
 } from '../../../src/repository/boards';
 import {
-  upsertPinnedThread,
-  upsertPlainThread,
-  upsertPlainThreadSummary,
+  upsertThread,
+  upsertThreadSummary,
   checkThreadExists,
   shouldSkipFetch,
 } from '../../../src/repository/threads';
-import { upsertPinnedPosts, upsertPlainPosts } from '../../../src/repository/posts';
+import { upsertPosts } from '../../../src/repository/posts';
 import {
   getBoardCrawlState,
   upsertBoardCrawlState,
@@ -51,6 +50,8 @@ afterEach(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+const BOARD_DB_PATH = 'forums/club/club-sh/BYRatSH.db';
+
 describe('layered storage — end-to-end', () => {
   async function seedTree() {
     await upsertSite({ siteKey: 's', displayName: 'S', baseUrl: 'https://s.example' });
@@ -60,66 +61,73 @@ describe('layered storage — end-to-end', () => {
     const { sectionId: subForumId } = await upsertSection({
       siteKey: 's', sectionKey: 'club-sh', name: 'Shanghai sub', parentSectionId: forumId,
     });
-    const { boardId } = await upsertBoard({
+    const { boardId, dbPath } = await upsertBoard({
       siteKey: 's', boardKey: 'BYRatSH', name: '北邮人在上海',
       sectionId: subForumId,
       moderators: ['alice', 'bob'],
-      stats: { online: 1, today: 2, threads: 3, posts: 4, snapshotAt: '2026-05-11T00:00:00Z' },
     });
-    return { forumId, subForumId, boardId };
+    return { forumId, subForumId, boardId, dbPath };
   }
 
-  it('nodes table holds the full tree, db_file only on forum rows', async () => {
+  it('nodes table holds the full tree, db_path only on board rows', async () => {
     const { forumId, subForumId, boardId } = await seedTree();
 
     const all = await getStructureDb().query<{
-      id: number; type: string; level: number; node_key: string; db_file: string | null;
-    }>(`SELECT id, type, level, node_key, db_file FROM nodes ORDER BY id`);
+      id: number; type: string; level: number; node_key: string;
+      db_path: string | null; full_path: string | null;
+    }>(`SELECT id, type, level, node_key, db_path, full_path FROM nodes ORDER BY id`);
     expect(all.rows).toHaveLength(3);
 
     const forum = all.rows.find((r) => r.id === forumId)!;
     expect(forum.type).toBe('forum');
     expect(forum.level).toBe(0);
-    expect(forum.db_file).toBe('forums/club.db');
+    expect(forum.db_path).toBeNull();
+    expect(forum.full_path).toBe('club');
 
     const sub = all.rows.find((r) => r.id === subForumId)!;
     expect(sub.type).toBe('sub_forum');
     expect(sub.level).toBe(1);
-    expect(sub.db_file).toBeNull();
+    expect(sub.db_path).toBeNull();
+    expect(sub.full_path).toBe('club/club-sh');
 
     const board = all.rows.find((r) => r.id === boardId)!;
     expect(board.type).toBe('board');
     expect(board.level).toBe(2);
-    expect(board.db_file).toBeNull();
+    expect(board.db_path).toBe(BOARD_DB_PATH);
+    expect(board.full_path).toBe('club/club-sh/BYRatSH');
   });
 
-  it('moderators + stats survive on board node as JSON', async () => {
+  it('moderators survive on board node as JSON; stats no longer stored on nodes', async () => {
     const { boardId } = await seedTree();
-    const row = await getStructureDb().query<{ moderators: string; stats: string }>(
-      `SELECT moderators, stats FROM nodes WHERE id = $1`,
+    const row = await getStructureDb().query<{ moderators: string }>(
+      `SELECT moderators FROM nodes WHERE id = $1`,
       [boardId],
     );
     expect(JSON.parse(row.rows[0]!.moderators)).toEqual(['alice', 'bob']);
-    expect(JSON.parse(row.rows[0]!.stats).threads).toBe(3);
+
+    const cols = await getStructureDb().query<{ name: string }>(
+      `SELECT name FROM pragma_table_info('nodes')`,
+    );
+    expect(cols.rows.map((r) => r.name)).not.toContain('stats');
   });
 
-  it('findForumDbFileForBoard walks up sub_forum to forum', async () => {
+  it('findBoardDbPath returns the board\'s own db_path', async () => {
     const { boardId } = await seedTree();
-    const dbFile = await findForumDbFileForBoard(boardId);
-    expect(dbFile).toBe('forums/club.db');
+    const dbPath = await findBoardDbPath(boardId);
+    expect(dbPath).toBe(BOARD_DB_PATH);
   });
 
-  it('resolveBoardRoute returns boardNodeId + forum file', async () => {
+  it('resolveBoardRoute returns boardNodeId + dbPath', async () => {
     const { boardId } = await seedTree();
     const route = await resolveBoardRoute('s', 'BYRatSH');
     expect(route.boardNodeId).toBe(boardId);
-    expect(route.forumDbFile).toBe('forums/club.db');
+    expect(route.dbPath).toBe(BOARD_DB_PATH);
   });
 
-  it('upsertPlainThread routes into the forum db; plain_posts go to same handle', async () => {
+  it('upsertThread routes into the board db; posts share the same handle', async () => {
     const { boardId } = await seedTree();
 
-    const { threadId, forumDb } = await upsertPlainThread('s', {
+    const { threadId, boardDb } = await upsertThread('s', {
       url: 'https://s.example/article/BYRatSH/100',
       title: 'Hi',
       board: 'BYRatSH',
@@ -128,86 +136,70 @@ describe('layered storage — end-to-end', () => {
         { floor: 1, author: 'bob',   contentHtml: '<p>b</p>', contentText: 'b' },
       ],
       fetchedAt: new Date().toISOString(),
-    });
-    await upsertPlainPosts(forumDb, threadId, [
+    }, { isPinned: false });
+    await upsertPosts(boardDb, threadId, [
       { floor: 0, author: 'alice', contentHtml: '<p>a</p>', contentText: 'a' },
       { floor: 1, author: 'bob',   contentHtml: '<p>b</p>', contentText: 'b' },
     ]);
 
-    const forumDb2 = getForumDb('forums/club.db');
-    const t = await forumDb2.query<{ id: number; title: string; board_node_id: number }>(
-      `SELECT id, title, board_node_id FROM plain_threads`,
+    const boardDb2 = getBoardDb(BOARD_DB_PATH);
+    const t = await boardDb2.query<{ id: number; title: string; board_node_id: number; is_pinned: number }>(
+      `SELECT id, title, board_node_id, is_pinned FROM threads`,
     );
-    expect(t.rows).toEqual([{ id: threadId, title: 'Hi', board_node_id: boardId }]);
+    expect(t.rows).toEqual([{ id: threadId, title: 'Hi', board_node_id: boardId, is_pinned: 0 }]);
 
-    const p = await forumDb2.query<{ floor: number; author: string }>(
-      `SELECT floor, author FROM plain_posts ORDER BY floor`,
+    const p = await boardDb2.query<{ floor: number; author: string }>(
+      `SELECT floor, author FROM posts ORDER BY floor`,
     );
     expect(p.rows).toEqual([
       { floor: 0, author: 'alice' },
       { floor: 1, author: 'bob' },
     ]);
-
-    // pinned_threads must remain empty.
-    const empty = await forumDb2.query<{ c: number }>(`SELECT count(*) AS c FROM pinned_threads`);
-    expect(empty.rows[0]!.c).toBe(0);
   });
 
-  it('flipping pinned → plain moves the row across tables (with posts)', async () => {
+  it('OR-merge: once a thread is pinned, re-upserting as plain keeps is_pinned=1', async () => {
     await seedTree();
     const url = 'https://s.example/article/BYRatSH/200';
 
-    // First insert as pinned with one post.
-    const pinned = await upsertPinnedThread('s', {
+    const pinned = await upsertThread('s', {
       url, title: 'Sticky', board: 'BYRatSH',
       posts: [{ floor: 0, author: 'alice', contentHtml: '<p>a</p>', contentText: 'a' }],
       fetchedAt: '2026-05-11T00:00:00Z',
-    });
-    await upsertPinnedPosts(pinned.forumDb, pinned.threadId, [
+    }, { isPinned: true });
+    await upsertPosts(pinned.boardDb, pinned.threadId, [
       { floor: 0, author: 'alice', contentHtml: '<p>a</p>', contentText: 'a' },
     ]);
 
-    // Now re-upsert as plain — should evict from pinned_threads + cascade pinned_posts.
-    const plain = await upsertPlainThread('s', {
+    await upsertThread('s', {
       url, title: 'Sticky 2', board: 'BYRatSH',
       posts: [{ floor: 0, author: 'alice', contentHtml: '<p>a2</p>', contentText: 'a2' }],
       fetchedAt: '2026-05-11T01:00:00Z',
-    });
-    await upsertPlainPosts(plain.forumDb, plain.threadId, [
-      { floor: 0, author: 'alice', contentHtml: '<p>a2</p>', contentText: 'a2' },
-    ]);
+    }, { isPinned: false });
 
-    const forumDb = getForumDb('forums/club.db');
-    const pinnedRows = await forumDb.query<{ c: number }>(`SELECT count(*) AS c FROM pinned_threads`);
-    expect(pinnedRows.rows[0]!.c).toBe(0);
-    const pinnedPostRows = await forumDb.query<{ c: number }>(`SELECT count(*) AS c FROM pinned_posts`);
-    expect(pinnedPostRows.rows[0]!.c).toBe(0);
-
-    const plainRows = await forumDb.query<{ title: string }>(`SELECT title FROM plain_threads WHERE url = $1`, [url]);
-    expect(plainRows.rows[0]!.title).toBe('Sticky 2');
-    const plainPostRows = await forumDb.query<{ content_text: string }>(
-      `SELECT content_text FROM plain_posts WHERE thread_id = $1`,
-      [plain.threadId],
+    const boardDb = getBoardDb(BOARD_DB_PATH);
+    const rows = await boardDb.query<{ title: string; is_pinned: number }>(
+      `SELECT title, is_pinned FROM threads WHERE url = $1`,
+      [url],
     );
-    expect(plainPostRows.rows[0]!.content_text).toBe('a2');
+    expect(rows.rows).toEqual([{ title: 'Sticky 2', is_pinned: 1 }]);
   });
 
-  it('shouldSkipFetch returns skipped=true when reply count matches (plain table)', async () => {
+  it('shouldSkipFetch returns skipped=true when reply count matches', async () => {
     await seedTree();
-    await upsertPlainThreadSummary('s', {
+    await upsertThreadSummary('s', {
       url: 'https://s.example/article/BYRatSH/300',
       title: 'T', board: 'BYRatSH', replyCount: 5,
-    });
+    }, { isPinned: false });
 
-    const skip = await shouldSkipFetch('s', 'BYRatSH', 'https://s.example/article/BYRatSH/300', 'plain', 5);
+    const skip = await shouldSkipFetch('s', 'BYRatSH', 'https://s.example/article/BYRatSH/300', 5);
     expect(skip.skipped).toBe(true);
 
     // Pass freshnessHours=0 so the recent last_fetched_at doesn't shortcut to skip.
-    const noSkip = await shouldSkipFetch('s', 'BYRatSH', 'https://s.example/article/BYRatSH/300', 'plain', 6, 0);
+    const noSkip = await shouldSkipFetch('s', 'BYRatSH', 'https://s.example/article/BYRatSH/300', 6, 0);
     expect(noSkip.skipped).toBe(false);
   });
 
-  it('board_crawl_state lives in the forum db, keyed by board_node_id', async () => {
+  it('board_crawl_state lives in the board db, keyed by board_node_id', async () => {
     const { boardId } = await seedTree();
     await upsertBoardCrawlState({
       boardId,
@@ -248,15 +240,10 @@ describe('layered storage — end-to-end', () => {
     const tops = await listTopLevelSections('s');
     expect(tops).toEqual([{ id: forumId, sectionKey: 'club', name: 'Club' }]);
 
-    // sub_forum 'club-sh' has board, so should NOT appear as missing.
-    // Add a second sub_forum with no boards — should appear.
     await upsertSection({ siteKey: 's', sectionKey: 'club-bj', name: 'Beijing sub', parentSectionId: forumId });
     const missing = await sectionsMissingBoards('s');
     expect(missing.map((m) => m.sectionKey).sort()).toEqual(['club', 'club-bj']);
-    // Note: 'club' itself has no DIRECT board children — its sub_forum has the board.
-    // So `club` appears in missing too, matching the strict "direct children" semantics.
     expect(missing.find((m) => m.sectionKey === subForumId.toString())).toBeUndefined();
-    // 'club-sh' (sub_forum with a board child) should NOT appear.
     expect(missing.find((m) => m.sectionKey === 'club-sh')).toBeUndefined();
   });
 
@@ -267,30 +254,37 @@ describe('layered storage — end-to-end', () => {
     expect(await hasSections('s')).toBe(true);
   });
 
-  it('boardsMissingPinned excludes boards that have a pinned thread', async () => {
-    const { boardId } = await seedTree();
+  it('boardsMissingPinned: a board with no db file yet shows as missing', async () => {
+    const { boardId, dbPath } = await seedTree();
 
-    // Add another board under same forum without any threads
+    // Add another board with no threads/db file.
     const { sectionId: bjId } = await upsertSection({
-      siteKey: 's', sectionKey: 'club-bj', name: 'BJ', parentSectionId: 1, // forumId is 1
+      siteKey: 's', sectionKey: 'club-bj', name: 'BJ', parentSectionId: 1,
     });
     const { boardId: bjBoardId } = await upsertBoard({
       siteKey: 's', boardKey: 'BJ-board', name: 'BJ board', sectionId: bjId,
     });
 
-    // Pin a thread under boardId only
-    await upsertPinnedThread('s', {
+    // First — both should appear (no .db file on disk yet).
+    let missing = await boardsMissingPinned('s');
+    expect(missing.map((m) => m.id).sort()).toEqual([boardId, bjBoardId].sort());
+
+    // Pin a thread under BYRatSH → that creates its .db file.
+    await upsertThread('s', {
       url: 'https://s.example/article/BYRatSH/500',
       title: 'pinned', board: 'BYRatSH', posts: [], fetchedAt: '2026-05-11T00:00:00Z',
-    });
+    }, { isPinned: true });
 
-    const missing = await boardsMissingPinned('s');
+    // Confirm the file actually got created.
+    expect(fs.existsSync(path.join(tmpDir, dbPath))).toBe(true);
+
+    missing = await boardsMissingPinned('s');
     const missingIds = missing.map((m) => m.id);
     expect(missingIds).not.toContain(boardId);
     expect(missingIds).toContain(bjBoardId);
   });
 
-  it('fetch_log writes to structure.db (not a forum db)', async () => {
+  it('fetch_log writes to structure.db (not a board db)', async () => {
     await appendFetchLog({
       siteKey: 's', tool: 'forum_get_thread', args: { url: 'u' },
       status: 'ok', durationMs: 42,
@@ -303,9 +297,7 @@ describe('layered storage — end-to-end', () => {
 
   it('checkThreadExists returns false when board exists but URL is absent', async () => {
     await seedTree();
-    const pinned = await checkThreadExists('s', 'BYRatSH', 'https://nope.example', 'pinned');
-    expect(pinned.exists).toBe(false);
-    const plain = await checkThreadExists('s', 'BYRatSH', 'https://nope.example', 'plain');
-    expect(plain.exists).toBe(false);
+    const r = await checkThreadExists('s', 'BYRatSH', 'https://nope.example');
+    expect(r.exists).toBe(false);
   });
 });

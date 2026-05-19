@@ -17,7 +17,7 @@ import * as path from 'path';
 import { chromium } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteEntries, validateConfigConsistency } from '../../src/core/site-config';
-import { initDbs, closeDbs } from '../../src/repository/db';
+import { initDb, closeAllDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { upsertSite } from '../../src/repository/sites';
 import { upsertSection } from '../../src/repository/sections';
@@ -29,7 +29,7 @@ async function main() {
   logger.info({ siteKey, script: 'init-sections' }, 'init-sections: 开始');
 
   const cfg = parseConfig(process.env);
-  initDbs({ dataDir: cfg.dataDir });
+  initDb({ dataDir: cfg.dataDir });
 
   const adapter = getAdapter(siteKey);
 
@@ -59,7 +59,7 @@ async function main() {
       { siteKey, persisted: entries.forums.length, dataDir: cfg.dataDir, elapsedMs: Date.now() - startedAt },
       'init-sections: 完成（来源：entries.yml）',
     );
-    await closeDbs();
+    await closeAllDbs();
     return;
   }
 
@@ -70,14 +70,14 @@ async function main() {
   );
   if (!adapter.listSections) {
     logger.error({ siteKey }, `adapter "${siteKey}" 未实现 listSections，且 entries.yml 缺失`);
-    await closeDbs();
+    await closeAllDbs();
     throw new Error(`Adapter "${siteKey}" does not implement listSections`);
   }
 
   const statePath = path.join(cfg.storageStateDir, `${siteKey}.json`);
   if (!fs.existsSync(statePath)) {
     logger.error({ statePath }, '会话状态文件不存在，请先运行 `npm run login`');
-    await closeDbs();
+    await closeAllDbs();
     throw new Error(`Storage state not found at ${statePath}. Run "npm run login" first.`);
   }
 
@@ -116,7 +116,7 @@ async function main() {
   } finally {
     await ctx.close();
     await browser.close();
-    await closeDbs();
+    await closeAllDbs();
   }
 }
 

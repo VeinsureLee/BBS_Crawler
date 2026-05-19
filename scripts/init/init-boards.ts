@@ -16,7 +16,7 @@ import * as path from 'path';
 import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteConfig } from '../../src/core/site-config';
-import { initDbs, closeDbs } from '../../src/repository/db';
+import { initDb, closeAllDbs } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { listTopLevelSections, upsertSection } from '../../src/repository/sections';
 import { upsertBoard } from '../../src/repository/boards';
@@ -55,7 +55,6 @@ async function crawlSectionRecursive(
       name: b.name,
       sectionId: parentSectionId,
       moderators: b.moderators,
-      stats: b.stats,
     });
     await upsertDailyTraffic(boardId, b.stats);
     boardCount++;
@@ -98,7 +97,7 @@ async function main() {
   const siteKey = process.argv[2] ?? 'school-bbs';
   const cfg = parseConfig(process.env);
   const siteConfig = loadSiteConfig(siteKey);
-  initDbs({ dataDir: cfg.dataDir });
+  initDb({ dataDir: cfg.dataDir });
 
   const requestIntervalMs = siteConfig.crawl.structureRequestIntervalMs;
 
@@ -169,7 +168,7 @@ async function main() {
   } finally {
     await ctx.close();
     await browser.close();
-    await closeDbs();
+    await closeAllDbs();
   }
 }
 

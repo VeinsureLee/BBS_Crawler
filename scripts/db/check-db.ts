@@ -1,8 +1,8 @@
 /**
  * Quick health check for the layered SQLite layout.
  *
- *   structure.db        sites / nodes / fetch_log
- *   forums/<key>.db     one per top-level forum: threads / posts / board_crawl_state / daily_traffic
+ *   structure.db                      sites / nodes / fetch_log
+ *   forums/<.../>>/<board>.db         one per board: threads / posts / board_crawl_state / daily_traffic
  *
  * Usage:
  *   npm run db:check                  # default site = school-bbs
@@ -12,11 +12,11 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 import { parseConfig } from '../../src/core/config';
-import { initDb, getStructureDb, getForumDb, closeAllDbs } from '../../src/repository/db';
+import { initDb, getStructureDb, getBoardDb, closeAllDbs } from '../../src/repository/db';
 import type { Db } from '../../src/repository/db';
 
 const STRUCTURE_TABLES = ['sites', 'nodes', 'fetch_log', 'migrations'] as const;
-const FORUM_TABLES = ['threads', 'posts', 'board_crawl_state', 'daily_traffic', 'migrations'] as const;
+const BOARD_TABLES = ['threads', 'posts', 'board_crawl_state', 'daily_traffic', 'migrations'] as const;
 
 async function dumpTables(label: string, db: Db, tables: readonly string[]): Promise<void> {
   console.log(`\n=== ${label} ===`);
@@ -49,30 +49,32 @@ async function main(): Promise<void> {
   try {
     await dumpTables('structure.db', getStructureDb(), STRUCTURE_TABLES);
 
-    const forums = await getStructureDb().query<{ node_key: string; name: string; db_file: string | null }>(
-      `SELECT node_key, name, db_file FROM nodes
-        WHERE site_key = $1 AND type = 'forum'
+    const boards = await getStructureDb().query<{
+      node_key: string; name: string; db_path: string | null; full_path: string | null;
+    }>(
+      `SELECT node_key, name, db_path, full_path FROM nodes
+        WHERE site_key = $1 AND type = 'board'
         ORDER BY id`,
       [siteKey],
     );
 
-    if (forums.rows.length === 0) {
-      console.log('\n(no top-level forums registered yet — run init:sections first)');
+    if (boards.rows.length === 0) {
+      console.log('\n(no boards registered yet — run init:sections + init:boards first)');
       return;
     }
 
-    for (const f of forums.rows) {
-      if (!f.db_file) {
-        console.log(`\n=== forum "${f.name}" (${f.node_key}) ===\n  (db_file column is null — broken)`);
+    for (const b of boards.rows) {
+      if (!b.db_path) {
+        console.log(`\n=== board "${b.name}" (${b.node_key}) ===\n  (db_path column is null — broken)`);
         continue;
       }
-      const abs = path.join(cfg.dataDir, f.db_file);
+      const abs = path.join(cfg.dataDir, b.db_path);
       const exists = fs.existsSync(abs);
-      console.log(`\n=== forum "${f.name}" (${f.node_key}) ===`);
-      console.log(`  file: ${f.db_file}${exists ? '' : '  (file not yet created)'}`);
+      console.log(`\n=== board "${b.name}" (${b.full_path ?? b.node_key}) ===`);
+      console.log(`  file: ${b.db_path}${exists ? '' : '  (file not yet created)'}`);
       if (!exists) continue;
-      const forumDb = getForumDb(f.db_file);
-      await dumpTables(`  tables in ${f.db_file}`, forumDb, FORUM_TABLES);
+      const boardDb = getBoardDb(b.db_path);
+      await dumpTables(`  tables in ${b.db_path}`, boardDb, BOARD_TABLES);
     }
   } finally {
     await closeAllDbs();

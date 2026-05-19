@@ -1,24 +1,23 @@
 /**
- * Database access layer — layered storage.
+ * Database access layer — layered storage, board-level files.
  *
- *   structure.db        one global file with:
- *                       - sites
- *                       - nodes (recursive tree: forum / sub_forum / board)
- *                       - fetch_log (API call audit)
+ *   structure.db                              global index:
+ *                                               - sites
+ *                                               - nodes (recursive tree: forum / sub_forum / board)
+ *                                               - fetch_log (API call audit)
  *
- *   forums/<key>.db     one file per top-level forum, with:
- *                       - pinned_threads / pinned_posts  (sticky/top threads)
- *                       - plain_threads  / plain_posts   (regular threads)
- *                       - board_crawl_state (per-board incremental progress)
- *                       - daily_traffic (per-board daily snapshots)
+ *   forums/<forum_key>/.../<board_key>.db     one file per board, with:
+ *                                               - threads (with is_pinned column)
+ *                                               - posts
+ *                                               - board_crawl_state (single row)
+ *                                               - daily_traffic
  *
- * A given URL lives in either `pinned_*` or `plain_*` — never both. The
- * upsert functions in `repository/threads.ts` move the row across tables
- * when a thread's sticky status flips between crawls.
+ * The directory chain mirrors the structure.db node tree: each forum / sub_forum
+ * is a directory, each board is a `.db` leaf. All path components use ASCII
+ * `node_key` (URL-derived), so filesystems don't have to deal with CJK names.
  *
- * Forum dbs are opened lazily on first reference via `getForumDb(dbFile)`.
- * The path stored in structure.db's `nodes.db_file` is the source of truth
- * for "which forum lives in which file".
+ * The path stored in `structure.db`'s `nodes.db_path` (board rows only) is the
+ * source of truth. Board dbs are opened lazily via `getBoardDb(dbPath)`.
  */
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -71,9 +70,9 @@ CREATE TABLE IF NOT EXISTS nodes (
   name            TEXT NOT NULL,
   type            TEXT NOT NULL CHECK (type IN ('forum','sub_forum','board')),
   level           INTEGER NOT NULL,
-  db_file         TEXT,
+  full_path       TEXT,
+  db_path         TEXT,
   moderators      TEXT,
-  stats           TEXT,
   raw             TEXT,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   last_crawled_at TEXT,
@@ -97,65 +96,35 @@ CREATE TABLE IF NOT EXISTS fetch_log (
 CREATE INDEX IF NOT EXISTS idx_fetch_log_created ON fetch_log(created_at);
 `;
 
-export const FORUM_SCHEMA = `
+export const BOARD_SCHEMA = `
 CREATE TABLE IF NOT EXISTS migrations (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
   applied_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS pinned_threads (
+CREATE TABLE IF NOT EXISTS threads (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   board_node_id   INTEGER NOT NULL,
-  url             TEXT NOT NULL,
+  url             TEXT NOT NULL UNIQUE,
   title           TEXT NOT NULL,
   author          TEXT,
   posted_at       TEXT,
   last_reply_at   TEXT,
   reply_count     INTEGER,
   view_count      INTEGER,
+  is_pinned       INTEGER NOT NULL DEFAULT 0,
   raw             TEXT,
   first_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  last_fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (url)
+  last_fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_pinned_threads_board ON pinned_threads(board_node_id, posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_posted        ON threads(posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_threads_pinned_posted ON threads(is_pinned, posted_at DESC);
 
-CREATE TABLE IF NOT EXISTS pinned_posts (
+CREATE TABLE IF NOT EXISTS posts (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  thread_id     INTEGER NOT NULL REFERENCES pinned_threads(id) ON DELETE CASCADE,
-  floor         INTEGER NOT NULL,
-  author        TEXT NOT NULL,
-  posted_at     TEXT,
-  content_html  TEXT NOT NULL,
-  content_text  TEXT NOT NULL,
-  attachments   TEXT,
-  raw           TEXT,
-  UNIQUE (thread_id, floor)
-);
-
-CREATE TABLE IF NOT EXISTS plain_threads (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  board_node_id   INTEGER NOT NULL,
-  url             TEXT NOT NULL,
-  title           TEXT NOT NULL,
-  author          TEXT,
-  posted_at       TEXT,
-  last_reply_at   TEXT,
-  reply_count     INTEGER,
-  view_count      INTEGER,
-  raw             TEXT,
-  first_seen_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  last_fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (url)
-);
-
-CREATE INDEX IF NOT EXISTS idx_plain_threads_board ON plain_threads(board_node_id, posted_at DESC);
-
-CREATE TABLE IF NOT EXISTS plain_posts (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  thread_id     INTEGER NOT NULL REFERENCES plain_threads(id) ON DELETE CASCADE,
+  thread_id     INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   floor         INTEGER NOT NULL,
   author        TEXT NOT NULL,
   posted_at     TEXT,
@@ -291,9 +260,6 @@ export class SQLiteDb implements Db {
   /**
    * Synchronous close — safe to call from signal handlers where awaiting a
    * Promise wouldn't run before process exit.
-   *
-   * Flushes the WAL, switches journal mode to DELETE so SQLite removes the
-   * -wal/-shm sidecar files, then closes the handle. Idempotent.
    */
   closeSync(): void {
     if (this._closed) return;
@@ -310,18 +276,17 @@ export class SQLiteDb implements Db {
 }
 
 // ---------------------------------------------------------------------------
-// Singletons + forum-db pool
+// Singletons + board-db pool
 // ---------------------------------------------------------------------------
 
 let structureDb_: SQLiteDb | null = null;
 let dataDir_: string | null = null;
 
-/** dbFile string → open SQLiteDb. dbFile is whatever `nodes.db_file` stored. */
-const forumDbCache = new Map<string, SQLiteDb>();
+/** dbPath string (relative, as stored in nodes.db_path) → open SQLiteDb. */
+const boardDbCache = new Map<string, SQLiteDb>();
 
 /**
- * Initialize the structure database. Idempotent — calling twice with the same
- * dataDir returns the existing instance.
+ * Initialize the structure database. Idempotent.
  */
 export function initDb(config: DbConfig): SQLiteDb {
   if (structureDb_) return structureDb_;
@@ -336,17 +301,16 @@ export function initDb(config: DbConfig): SQLiteDb {
 
 // ---------------------------------------------------------------------------
 // Process-level cleanup — close dbs on Ctrl+C / SIGTERM / unhandled errors so
-// SQLite's -wal/-shm sidecar files don't get left behind. Registered once;
-// repeated initDb() calls (and tests) are no-ops.
+// SQLite's -wal/-shm sidecar files don't get left behind.
 // ---------------------------------------------------------------------------
 
 let exitHandlersRegistered = false;
 
 function closeAllDbsSync(): void {
-  for (const [, db] of forumDbCache) {
+  for (const [, db] of boardDbCache) {
     try { db.closeSync(); } catch { /* best effort */ }
   }
-  forumDbCache.clear();
+  boardDbCache.clear();
   if (structureDb_) {
     try { structureDb_.closeSync(); } catch { /* best effort */ }
     structureDb_ = null;
@@ -360,8 +324,6 @@ function registerExitHandlers(): void {
 
   const onSignal = (signal: NodeJS.Signals): void => {
     closeAllDbsSync();
-    // Re-raise so the exit code reflects the signal. Removing our listener
-    // first means the default handler (terminate) takes over.
     process.removeListener(signal, onSignal);
     process.kill(process.pid, signal);
   };
@@ -369,9 +331,6 @@ function registerExitHandlers(): void {
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   process.on('SIGHUP', onSignal);
-  // 'exit' fires synchronously for: natural completion, process.exit(), and
-  // after Node prints an uncaught exception. Only sync code runs here, which
-  // is fine because better-sqlite3 is sync underneath.
   process.on('exit', closeAllDbsSync);
 }
 
@@ -381,37 +340,34 @@ export function getStructureDb(): SQLiteDb {
 }
 
 /**
- * Open (or fetch from cache) a forum db at the given relative path. The path
- * comes from structure.db's nodes.db_file column. Schema is applied on first
- * open (idempotent), so this also works for brand-new forum files.
- *
- * Accepts an absolute path too, primarily for tests using ':memory:' or tmp dirs.
+ * Get the current data directory. Throws if initDb hasn't been called.
  */
-export function getForumDb(dbFile: string): SQLiteDb {
-  const cached = forumDbCache.get(dbFile);
-  if (cached) return cached;
-
-  const abs = path.isAbsolute(dbFile) || dbFile === ':memory:'
-    ? dbFile
-    : (dataDir_ ?? (() => { throw new DatabaseError('initDb has not been called'); })()) + path.sep + dbFile;
-  const normalized = abs === ':memory:' ? abs : path.normalize(abs);
-
-  const db = new SQLiteDb(normalized);
-  db.applySchema(FORUM_SCHEMA);
-  ensureDailyTrafficColumns(db);
-  forumDbCache.set(dbFile, db);
-  return db;
+export function getDataDir(): string {
+  if (!dataDir_) throw new DatabaseError('initDb has not been called');
+  return dataDir_;
 }
 
 /**
- * Idempotent ALTER for forum dbs created before snapshot_at existed.
- * SQLite has no "ADD COLUMN IF NOT EXISTS", so we inspect table_info first.
+ * Open (or fetch from cache) a board db at the given relative path. The path
+ * comes from structure.db's nodes.db_path column (e.g. `forums/Campus/IWisper.db`).
+ * Schema is applied on first open (idempotent), so this also works for
+ * brand-new board files.
+ *
+ * Accepts absolute paths or ':memory:' for tests.
  */
-function ensureDailyTrafficColumns(db: SQLiteDb): void {
-  const cols = db.rawAll<{ name: string }>(`PRAGMA table_info(daily_traffic)`);
-  if (!cols.some((c) => c.name === 'snapshot_at')) {
-    db.rawExec(`ALTER TABLE daily_traffic ADD COLUMN snapshot_at TEXT`);
-  }
+export function getBoardDb(dbPath: string): SQLiteDb {
+  const cached = boardDbCache.get(dbPath);
+  if (cached) return cached;
+
+  const abs = path.isAbsolute(dbPath) || dbPath === ':memory:'
+    ? dbPath
+    : (dataDir_ ?? (() => { throw new DatabaseError('initDb has not been called'); })()) + path.sep + dbPath;
+  const normalized = abs === ':memory:' ? abs : path.normalize(abs);
+
+  const db = new SQLiteDb(normalized);
+  db.applySchema(BOARD_SCHEMA);
+  boardDbCache.set(dbPath, db);
+  return db;
 }
 
 /** Closes all open dbs and resets singletons. Idempotent. */
@@ -423,20 +379,5 @@ export async function closeAllDbs(): Promise<void> {
 export function _resetForTests(): void {
   structureDb_ = null;
   dataDir_ = null;
-  forumDbCache.clear();
-}
-
-// ---------------------------------------------------------------------------
-// Deprecated aliases — kept so the upcoming migration commit doesn't break in
-// the middle. Will be removed once all callers are off the old API.
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use initDb instead. */
-export function initDbs(config: DbConfig): { structureDb: Db } {
-  return { structureDb: initDb(config) };
-}
-
-/** @deprecated Use closeAllDbs instead. */
-export async function closeDbs(): Promise<void> {
-  await closeAllDbs();
+  boardDbCache.clear();
 }

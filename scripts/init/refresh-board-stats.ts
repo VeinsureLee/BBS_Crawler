@@ -20,7 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { chromium } from 'playwright';
 import { parseConfig } from '../../src/core/config';
-import { initDbs, closeDbs } from '../../src/repository/db';
+import { initDb, closeAllDbs } from '../../src/repository/db';
 import { runRefreshBoardStats, type RefreshBoardStatsOpts } from '../../src/core/init-runners';
 import { logger } from '../../src/util/logger';
 
@@ -65,7 +65,7 @@ async function main() {
   if (!opts.all && !opts.sectionKey && !opts.boardName) usage();
 
   const cfg = parseConfig(process.env);
-  initDbs({ dataDir: cfg.dataDir });
+  initDb({ dataDir: cfg.dataDir });
 
   const statePath = path.join(cfg.storageStateDir, `${siteKey}.json`);
   if (!fs.existsSync(statePath)) {
@@ -93,7 +93,7 @@ async function main() {
   } finally {
     await ctx.close();
     await browser.close();
-    await closeDbs();
+    await closeAllDbs();
   }
 }
 

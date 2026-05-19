@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { initDb, getStructureDb, getForumDb, closeAllDbs } from '../../src/repository/db';
+import { initDb, getStructureDb, getBoardDb, closeAllDbs } from '../../src/repository/db';
 
 async function main(): Promise<void> {
   console.log('Env:');
@@ -17,17 +17,17 @@ async function main(): Promise<void> {
   console.log('Sample boards:');
   for (const row of boards.rows) console.log('  ', row);
 
-  const forums = await getStructureDb().query<{ db_file: string }>(
-    `SELECT db_file FROM nodes
-      WHERE site_key = 'school-bbs' AND type = 'forum' AND db_file IS NOT NULL`,
+  const allBoards = await getStructureDb().query<{ db_path: string }>(
+    `SELECT db_path FROM nodes
+      WHERE site_key = 'school-bbs' AND type = 'board' AND db_path IS NOT NULL`,
   );
 
   let plainTotal = 0;
   let pinnedTotal = 0;
-  for (const f of forums.rows) {
-    const forumDb = getForumDb(f.db_file);
-    const plain = await forumDb.query<{ c: number }>(`SELECT count(*) AS c FROM plain_threads`);
-    const pinned = await forumDb.query<{ c: number }>(`SELECT count(*) AS c FROM pinned_threads`);
+  for (const b of allBoards.rows) {
+    const boardDb = getBoardDb(b.db_path);
+    const plain = await boardDb.query<{ c: number }>(`SELECT count(*) AS c FROM threads WHERE is_pinned = 0`);
+    const pinned = await boardDb.query<{ c: number }>(`SELECT count(*) AS c FROM threads WHERE is_pinned = 1`);
     plainTotal += plain.rows[0]!.c;
     pinnedTotal += pinned.rows[0]!.c;
   }

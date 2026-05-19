@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   initDb,
   closeAllDbs,
-  getForumDb,
+  getBoardDb,
   _resetForTests,
 } from '../../../src/repository/db';
 import { upsertSite } from '../../../src/repository/sites';
@@ -31,13 +31,14 @@ afterEach(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+const BOARD_DB_PATH = 'forums/club/B.db';
+
 async function seedBoard(): Promise<number> {
   await upsertSite({ siteKey: 's', displayName: 'S', baseUrl: 'https://s.example' });
   const { sectionId } = await upsertSection({ siteKey: 's', sectionKey: 'club', name: 'Club' });
   const { boardId } = await upsertBoard({
     siteKey: 's', boardKey: 'B', name: 'Board',
     sectionId,
-    stats: { online: 0, today: 0, threads: 0, posts: 0, snapshotAt: '2026-05-11T00:00:00Z' },
   });
   return boardId;
 }
@@ -94,9 +95,8 @@ describe('upsertDailyTraffic', () => {
     expect(row?.posts).toBe(13);
     expect(row?.snapshotAt).toBe('2026-05-12T07:00:00.000Z');
 
-    // Only one row exists
-    const forumDb = getForumDb('forums/club.db');
-    const all = await forumDb.query<{ c: number }>(
+    const boardDb = getBoardDb(BOARD_DB_PATH);
+    const all = await boardDb.query<{ c: number }>(
       `SELECT count(*) AS c FROM daily_traffic WHERE board_node_id = $1`,
       [boardId],
     );
@@ -144,39 +144,5 @@ describe('upsertDailyTraffic', () => {
     const boardId = await seedBoard();
     const row = await getDailyTrafficForDate(boardId, '2099-01-01');
     expect(row).toBeNull();
-  });
-
-  it('snapshot_at column migration adds the column to old forum dbs', async () => {
-    // Simulate an "old" forum db: re-create daily_traffic without snapshot_at,
-    // then ensure getForumDb adds the column back on next open.
-    const boardId = await seedBoard();
-    const forumDb = getForumDb('forums/club.db');
-    await forumDb.exec(`DROP TABLE daily_traffic`);
-    await forumDb.exec(`
-      CREATE TABLE daily_traffic (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        board_node_id INTEGER NOT NULL,
-        date          TEXT NOT NULL,
-        online        INTEGER,
-        today_posts   INTEGER,
-        threads       INTEGER,
-        posts         INTEGER,
-        UNIQUE (board_node_id, date)
-      );
-    `);
-    // Force close + re-open so the migration check runs again.
-    await closeAllDbs();
-    _resetForTests();
-    initDb({ dataDir: tmpDir });
-    // Touch the forum db; migration runs in getForumDb.
-    getForumDb('forums/club.db');
-
-    // Now insert via repo — would fail with "no such column: snapshot_at" if migration didn't run.
-    await upsertDailyTraffic(boardId, {
-      online: 1, today: 1, threads: 1, posts: 1,
-      snapshotAt: '2026-05-12T03:04:00.000Z',
-    });
-    const row = await getDailyTrafficForDate(boardId, '2026-05-12');
-    expect(row?.snapshotAt).toBe('2026-05-12T03:04:00.000Z');
   });
 });

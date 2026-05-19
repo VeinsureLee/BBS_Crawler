@@ -20,8 +20,8 @@ import {
   upsertBoard,
   type BoardRow,
 } from '../repository/boards';
-import { upsertPinnedThread } from '../repository/threads';
-import { upsertPinnedPosts } from '../repository/posts';
+import { upsertThread } from '../repository/threads';
+import { upsertPosts } from '../repository/posts';
 import { upsertDailyTraffic } from '../repository/daily-traffic';
 import { findBoardByName } from '../repository/boards-lookup';
 import { getStructureDb } from '../repository/db';
@@ -104,7 +104,7 @@ export async function runInitBoards(
     for (const b of children.boards) {
       const { boardId } = await upsertBoard({
         siteKey, boardKey: b.boardKey, name: b.name,
-        sectionId: sec.id, moderators: b.moderators, stats: b.stats,
+        sectionId: sec.id, moderators: b.moderators,
       });
       await upsertDailyTraffic(boardId, b.stats);
     }
@@ -117,7 +117,7 @@ export async function runInitBoards(
       for (const b of nested.boards) {
         const { boardId } = await upsertBoard({
           siteKey, boardKey: b.boardKey, name: b.name,
-          sectionId, moderators: b.moderators, stats: b.stats,
+          sectionId, moderators: b.moderators,
         });
         await upsertDailyTraffic(boardId, b.stats);
       }
@@ -129,7 +129,8 @@ export async function runInitBoards(
 
 /**
  * For each board in `boards`, fetch its pinned-thread ids, then fetch each
- * thread and persist into `pinned_threads` + `pinned_posts`. Sequential
+ * thread and persist into the unified `threads` + `posts` tables with
+ * `is_pinned = 1`. Sequential
  * (no concurrency) — the MCP-triggered path runs one board at a time so it
  * stays predictable; the standalone `init:threads` script keeps its parallel
  * implementation.
@@ -162,8 +163,8 @@ export async function runInitPinned(
           url, maxPages: cfg.crawl.maxPinnedThreadPages,
         });
         thread.raw = { ...(thread.raw ?? {}), pinned: true };
-        const { threadId, forumDb } = await upsertPinnedThread(siteKey, thread);
-        await upsertPinnedPosts(forumDb, threadId, thread.posts);
+        const { threadId, boardDb } = await upsertThread(siteKey, thread, { isPinned: true });
+        await upsertPosts(boardDb, threadId, thread.posts);
       } catch (e) {
         logger.warn({ siteKey, board: board.boardKey, articleId, err: String(e) }, 'init: pinned thread fetch failed; skipping');
       }
@@ -194,10 +195,10 @@ export interface RefreshBoardStatsResult {
 }
 
 /**
- * Lightweight refresh of `nodes.stats` + `daily_traffic` for boards under one
- * or more parent sections. Does NOT crawl threads. Each section page is the
- * source for `online / today / threads / posts`, so the API surface is
- * parent-section-oriented even when the caller specifies a single board.
+ * Lightweight refresh of `daily_traffic` for boards under one or more parent
+ * sections. Does NOT crawl threads. Each section page is the source for
+ * `online / today / threads / posts`, so the API surface is parent-section-
+ * oriented even when the caller specifies a single board.
  */
 export async function runRefreshBoardStats(
   page: Page,
@@ -223,7 +224,6 @@ export async function runRefreshBoardStats(
         name: b.name,
         sectionId: t.sectionId,
         moderators: b.moderators,
-        stats: b.stats,
       });
       await upsertDailyTraffic(boardId, b.stats);
       boardsUpdated++;

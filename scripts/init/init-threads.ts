@@ -2,8 +2,8 @@
  * Init step 3: crawl pinned threads (default) and optionally the first page
  * of non-pinned threads (`--with-plain`) for every board in DB.
  *
- * Pinned data → pinned_threads / pinned_posts
- * Plain data  → plain_threads  / plain_posts  (each thread truncated to page 1)
+ * Pinned data → threads + posts with is_pinned = 1
+ * Plain data  → threads + posts with is_pinned = 0 (each thread truncated to page 1)
  *
  * Replaces the older `init:pinned` + `init:plain` scripts. The multi-worker
  * model is identical: one BrowserContext, N pages as workers, single
@@ -28,11 +28,11 @@ import * as path from 'path';
 import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteConfig } from '../../src/core/site-config';
-import { initDbs, closeDbs, getStructureDb } from '../../src/repository/db';
+import { initDb, closeAllDbs, getStructureDb } from '../../src/repository/db';
 import { getAdapter } from '../../src/core/registry';
 import { listBoards } from '../../src/repository/boards';
-import { upsertPinnedThread, upsertPlainThread } from '../../src/repository/threads';
-import { upsertPinnedPosts, upsertPlainPosts } from '../../src/repository/posts';
+import { upsertThread } from '../../src/repository/threads';
+import { upsertPosts } from '../../src/repository/posts';
 import { logger } from '../../src/util/logger';
 import { Ui, type ProgressSnapshot, type ForumLine } from './init-ui';
 
@@ -325,8 +325,8 @@ async function processBoard(
         const thread = await adapter.getThread(page, { url, maxPages: maxPinnedThreadPages });
         thread.raw = { ...(thread.raw ?? {}), pinned: true };
 
-        const { threadId, forumDb } = await upsertPinnedThread(siteKey, thread);
-        await upsertPinnedPosts(forumDb, threadId, thread.posts);
+        const { threadId, boardDb } = await upsertThread(siteKey, thread, { isPinned: true });
+        await upsertPosts(boardDb, threadId, thread.posts);
 
         result.pinnedThreads++;
         result.pinnedPosts += thread.posts.length;
@@ -367,8 +367,8 @@ async function processBoard(
         try {
           const thread = await adapter.getThread(page, { url: summary.url, maxPages: 1 });
 
-          const { threadId, forumDb } = await upsertPlainThread(siteKey, thread);
-          await upsertPlainPosts(forumDb, threadId, thread.posts);
+          const { threadId, boardDb } = await upsertThread(siteKey, thread, { isPinned: false });
+          await upsertPosts(boardDb, threadId, thread.posts);
 
           result.plainThreads++;
           result.plainPosts += thread.posts.length;
@@ -557,7 +557,7 @@ async function main() {
 
   const cfg = parseConfig(process.env);
   const siteConfig = loadSiteConfig(siteKey);
-  initDbs({ dataDir: cfg.dataDir });
+  initDb({ dataDir: cfg.dataDir });
 
   const adapter = getAdapter(siteKey);
   if (!adapter.listPinnedThreadIds || !adapter.getThread || !adapter.listThreads) {
@@ -716,7 +716,7 @@ async function main() {
     if (!browserDied) ui.stop();
     await ctx.close().catch(() => {});
     await browser.close().catch(() => {});
-    await closeDbs();
+    await closeAllDbs();
     if (browserDied) process.exitCode = 2;
   }
 }

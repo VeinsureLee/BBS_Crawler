@@ -76,25 +76,29 @@ export function loadForumStructure(inputPath: string): ForumStructure {
 async function buildSectionTree(siteKey: string): Promise<SectionStructure[]> {
   const db = getStructureDb();
 
-  // Get all sections
+  // Get all section nodes (forum + sub_forum).
   const sectionsResult = await db.query<{
     id: number;
-    section_key: string;
+    node_key: string;
     name: string | null;
-    parent_section_id: number | null;
+    parent_id: number | null;
   }>(
-    `SELECT id, section_key, name, parent_section_id FROM sections WHERE site_key = $1 ORDER BY id`,
+    `SELECT id, node_key, name, parent_id FROM nodes
+      WHERE site_key = $1 AND type IN ('forum','sub_forum')
+      ORDER BY id`,
     [siteKey],
   );
 
-  // Get all boards
+  // Get all board nodes.
   const boardsResult = await db.query<{
     id: number;
-    board_key: string;
+    node_key: string;
     name: string | null;
-    section_id: number | null;
+    parent_id: number | null;
   }>(
-    `SELECT id, board_key, name, section_id FROM boards WHERE site_key = $1 ORDER BY id`,
+    `SELECT id, node_key, name, parent_id FROM nodes
+      WHERE site_key = $1 AND type = 'board'
+      ORDER BY id`,
     [siteKey],
   );
 
@@ -103,8 +107,8 @@ async function buildSectionTree(siteKey: string): Promise<SectionStructure[]> {
   for (const row of sectionsResult.rows) {
     sectionMap.set(row.id, {
       id: row.id,
-      parentId: row.parent_section_id,
-      sectionKey: row.section_key,
+      parentId: row.parent_id,
+      sectionKey: row.node_key,
       name: row.name ?? '',
       subSections: [],
       boards: [],
@@ -115,12 +119,12 @@ async function buildSectionTree(siteKey: string): Promise<SectionStructure[]> {
   const boardMap = new Map<number, BoardStructure[]>();
   for (const row of boardsResult.rows) {
     const board: BoardStructure = {
-      boardKey: row.board_key,
+      boardKey: row.node_key,
       name: row.name ?? '',
       pinnedCount: 0,
       pinnedThreads: [],
     };
-    const sectionId = row.section_id;
+    const sectionId = row.parent_id;
     if (sectionId !== null) {
       const boards = boardMap.get(sectionId) ?? [];
       boards.push(board);
