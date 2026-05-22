@@ -37,6 +37,7 @@
 
     "debug:board": "tsx scripts/debug/debug-board.ts",
     "debug:failed-boards": "tsx scripts/debug/explore-failed-boards.ts",
+    "debug:probe-sections": "tsx scripts/debug/probe-section-names.ts",
 
     "explore": "tsx scripts/util/explore.ts",
     "format:html": "tsx scripts/util/format-html.ts",

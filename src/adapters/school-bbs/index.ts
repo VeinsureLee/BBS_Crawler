@@ -88,8 +88,21 @@ async function listSectionChildren(page: Page, sectionKey: string): Promise<Sect
   if (!baseUrl) throw new Error('SCHOOL_BBS_BASE_URL not set');
 
   const target = buildRouteUrl(baseUrl, cfg.routes.section, { key: sectionKey });
+  // SPA hashbang route: navigating from /#!section/A to /#!section/B is only a
+  // hash change, page.goto does not actually reload, and waitForSelector then
+  // sees the previous section's stale rows and returns instantly. Forcing
+  // about:blank first guarantees a real navigation. Same pattern as
+  // listPinnedThreadIds / fetchThreadPage below.
+  await page.goto('about:blank');
   await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForSelector(ui.section.boardRowReady, { timeout: 15000 });
+  // Extra guard: ensure the hash actually points at the requested section so
+  // we never read a half-loaded previous frame.
+  await page.waitForFunction(
+    `location.hash === '#!section/${sectionKey}'`,
+    undefined,
+    { timeout: 5000 },
+  );
 
   const rows = await page.$$eval('table.board-list tbody tr', (trs) => {
     const out = [];
