@@ -9,10 +9,10 @@
  * Stats are no longer stored on the node row — daily_traffic (inside the
  * board db) is the single source of truth for online / today / threads / posts.
  */
-import { getStructureDb } from './db';
-import { DatabaseError } from '../core/errors';
-import { logger } from '../util/logger';
-import { safeFileName } from './sections';
+import { getStructureDb } from './db.js';
+import { DatabaseError } from '../core/errors.js';
+import { logger } from '../util/logger.js';
+import { safeFileName } from './sections.js';
 
 export interface UpsertBoardInput {
   siteKey: string;

@@ -23,10 +23,10 @@ export type {
   BoardSummary,
   BoardStats,
   SectionChildren,
-} from './core/site-adapter';
+} from './core/site-adapter.js';
 
 // Core services
-export { CrawlerService } from './core/crawler-service';
+export { CrawlerService } from './core/crawler-service.js';
 export type {
   CrawlerServiceDeps,
   FetchThreadInput,
@@ -38,24 +38,24 @@ export type {
   ListThreadsByNameInput,
   ListThreadsByNameOutput,
   FetchThreadByIdInput,
-} from './core/crawler-service';
-export { InitOrchestrator } from './core/init-orchestrator';
-export type { InitOrchestratorDeps } from './core/init-orchestrator';
+} from './core/crawler-service.js';
+export { InitOrchestrator } from './core/init-orchestrator.js';
+export type { InitOrchestratorDeps } from './core/init-orchestrator.js';
 export {
   runInitSections,
   runInitBoards,
   runInitPinned,
   runRefreshBoardStats,
-} from './core/init-runners';
+} from './core/init-runners.js';
 export type {
   RefreshBoardStatsOpts,
   RefreshBoardStatsResult,
-} from './core/init-runners';
-export { AuthManager } from './core/auth-manager';
-export { BrowserPool } from './core/browser-pool';
-export { createRateLimiter } from './core/rate-limiter';
-export { listAdapters, getAdapter } from './core/registry';
-export { parseConfig } from './core/config';
+} from './core/init-runners.js';
+export { AuthManager } from './core/auth-manager.js';
+export { BrowserPool } from './core/browser-pool.js';
+export { createRateLimiter } from './core/rate-limiter.js';
+export { listAdapters, getAdapter } from './core/registry.js';
+export { parseConfig } from './core/config.js';
 
 // Errors
 export {
@@ -70,7 +70,7 @@ export {
   DatabaseError,
   BoardNotFoundError,
   FetchFailedError,
-} from './core/errors';
+} from './core/errors.js';
 
 // Database
 export {
@@ -81,59 +81,59 @@ export {
   closeAllDbs,
   STRUCTURE_SCHEMA,
   BOARD_SCHEMA,
-} from './repository/db';
-export type { Db, DbConfig } from './repository/db';
+} from './repository/db.js';
+export type { Db, DbConfig } from './repository/db.js';
 
 // Repositories
-export { upsertSite } from './repository/sites';
-export type { SiteRow } from './repository/sites';
-export { hasSections, sectionsMissingBoards, listTopLevelSections, upsertSection, safeFileName } from './repository/sections';
-export type { UpsertSectionInput, UpsertSectionResult, SectionRow } from './repository/sections';
+export { upsertSite } from './repository/sites.js';
+export type { SiteRow } from './repository/sites.js';
+export { hasSections, sectionsMissingBoards, listTopLevelSections, upsertSection, safeFileName } from './repository/sections.js';
+export type { UpsertSectionInput, UpsertSectionResult, SectionRow } from './repository/sections.js';
 export {
   boardsMissingPinned,
   listBoards,
   upsertBoard,
   resolveBoardRoute,
   findBoardDbPath,
-} from './repository/boards';
-export type { UpsertBoardInput, UpsertBoardResult, BoardRow } from './repository/boards';
+} from './repository/boards.js';
+export type { UpsertBoardInput, UpsertBoardResult, BoardRow } from './repository/boards.js';
 export {
   upsertThread,
   upsertThreadSummary,
   checkThreadExists,
   getCrawledThreadUrls,
   shouldSkipFetch,
-} from './repository/threads';
+} from './repository/threads.js';
 export type {
   UpsertThreadOpts,
   UpsertThreadResult,
   ThreadExistsResult,
   FetchSkippedResult,
-} from './repository/threads';
-export { upsertPosts } from './repository/posts';
-export { getBoardCrawlState, upsertBoardCrawlState } from './repository/board-crawl-state';
-export type { BoardCrawlState, UpsertBoardCrawlStateInput } from './repository/board-crawl-state';
+} from './repository/threads.js';
+export { upsertPosts } from './repository/posts.js';
+export { getBoardCrawlState, upsertBoardCrawlState } from './repository/board-crawl-state.js';
+export type { BoardCrawlState, UpsertBoardCrawlStateInput } from './repository/board-crawl-state.js';
 export {
   upsertDailyTraffic,
   getDailyTrafficForDate,
   getLatestDailyTraffic,
   beijingDate,
-} from './repository/daily-traffic';
-export type { DailyTrafficRow } from './repository/daily-traffic';
-export { appendFetchLog } from './repository/fetch-log';
-export type { FetchLogRow, FetchLogStatus } from './repository/fetch-log';
-export { findBoardByName, getBoardById } from './repository/boards-lookup';
+} from './repository/daily-traffic.js';
+export type { DailyTrafficRow } from './repository/daily-traffic.js';
+export { appendFetchLog } from './repository/fetch-log.js';
+export type { FetchLogRow, FetchLogStatus } from './repository/fetch-log.js';
+export { findBoardByName, getBoardById } from './repository/boards-lookup.js';
 
 // Export forum structure
-export { exportForumStructure, loadForumStructure } from './export/exporter';
+export { exportForumStructure, loadForumStructure } from './export/exporter.js';
 export type {
   ForumStructure,
   SiteInfo,
   SectionStructure,
   BoardStructure,
   PinnedThreadInfo,
-} from './export/types';
+} from './export/types.js';
 
 // Utils
-export { logger, addRedactedSecret, appLogPath } from './util/logger';
-export { retry } from './util/retry';
+export { logger, addRedactedSecret, appLogPath } from './util/logger.js';
+export { retry } from './util/retry.js';

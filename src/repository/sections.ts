@@ -9,8 +9,8 @@
  * from the root down) and `db_path = NULL` — their physical directories are
  * created lazily on first board write, no .db file lives at this level.
  */
-import { getStructureDb } from './db';
-import { DatabaseError } from '../core/errors';
+import { getStructureDb } from './db.js';
+import { DatabaseError } from '../core/errors.js';
 
 export interface UpsertSectionInput {
   siteKey: string;

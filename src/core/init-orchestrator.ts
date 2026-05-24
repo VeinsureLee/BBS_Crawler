@@ -10,8 +10,8 @@
  * Concurrency: a per-siteKey inflight Promise dedupes overlapping callers.
  * Once an init succeeds, future calls hit the `done` set and return immediately.
  */
-import type { SectionRow } from '../repository/sections';
-import type { BoardRow } from '../repository/boards';
+import type { SectionRow } from '../repository/sections.js';
+import type { BoardRow } from '../repository/boards.js';
 
 export interface InitOrchestratorDeps {
   hasSections: (siteKey: string) => Promise<boolean>;

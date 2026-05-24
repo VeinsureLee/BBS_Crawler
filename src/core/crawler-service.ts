@@ -5,19 +5,19 @@ import type {
   ThreadSummary,
   ListParams,
   SearchParams,
-} from './site-adapter';
+} from './site-adapter.js';
 import {
   SessionExpiredError,
   NavigationTimeoutError,
   RateLimitedError,
   BoardNotFoundError,
   FetchFailedError,
-} from './errors';
-import { logger } from '../util/logger';
-import { upsertThreadSummary } from '../repository/threads';
-import { findBoardByName } from '../repository/boards-lookup';
-import { getBoardCrawlState, upsertBoardCrawlState } from '../repository/board-crawl-state';
-import type { InitOrchestrator } from './init-orchestrator';
+} from './errors.js';
+import { logger } from '../util/logger.js';
+import { upsertThreadSummary } from '../repository/threads.js';
+import { findBoardByName } from '../repository/boards-lookup.js';
+import { getBoardCrawlState, upsertBoardCrawlState } from '../repository/board-crawl-state.js';
+import type { InitOrchestrator } from './init-orchestrator.js';
 
 export interface CrawlerServiceDeps {
   rateLimiter: { acquire: (siteKey: string) => Promise<() => void> };

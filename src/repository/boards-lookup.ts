@@ -2,8 +2,8 @@
  * Lookups for board nodes (`nodes WHERE type='board'`) in structure.db.
  * Used by crawler-service to translate user-facing names → board node ids.
  */
-import { getStructureDb } from './db';
-import { DatabaseError } from '../core/errors';
+import { getStructureDb } from './db.js';
+import { DatabaseError } from '../core/errors.js';
 
 export interface BoardRow {
   id: number;

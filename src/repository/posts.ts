@@ -4,9 +4,9 @@
  * pass it to `upsertPosts` here. This avoids repeating the (siteKey, boardKey)
  * → board-db lookup.
  */
-import type { Db } from './db';
-import { DatabaseError } from '../core/errors';
-import type { Post } from '../core/site-adapter';
+import type { Db } from './db.js';
+import { DatabaseError } from '../core/errors.js';
+import type { Post } from '../core/site-adapter.js';
 
 /**
  * Insert/update floors for a thread row. Idempotent — re-running with the

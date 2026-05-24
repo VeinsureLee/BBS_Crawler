@@ -23,8 +23,8 @@
  * ISO 8601 by treating 00:00 local time as the timestamp.
  */
 import type { Page } from 'playwright';
-import type { ListParams, ThreadSummary } from '../../core/site-adapter';
-import { buildRouteUrl } from '../../core/site-config';
+import type { ListParams, ThreadSummary } from '../../core/site-adapter.js';
+import { buildRouteUrl } from '../../core/site-config.js';
 
 const CST_OFFSET_MS = 8 * 3600 * 1000;
 

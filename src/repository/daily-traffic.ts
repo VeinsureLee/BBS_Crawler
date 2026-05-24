@@ -7,10 +7,10 @@
  * of each day, not a per-call history. This is also the **only** place stats
  * are persisted; `nodes` no longer carries a `stats` column.
  */
-import { getBoardDb, type Db } from './db';
-import { DatabaseError } from '../core/errors';
-import { findBoardDbPath } from './boards';
-import type { BoardStats } from '../core/site-adapter';
+import { getBoardDb, type Db } from './db.js';
+import { DatabaseError } from '../core/errors.js';
+import { findBoardDbPath } from './boards.js';
+import type { BoardStats } from '../core/site-adapter.js';
 
 export interface DailyTrafficRow {
   boardNodeId: number;

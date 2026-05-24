@@ -1,5 +1,5 @@
-import { getStructureDb } from './db';
-import { DatabaseError } from '../core/errors';
+import { getStructureDb } from './db.js';
+import { DatabaseError } from '../core/errors.js';
 
 export interface SiteRow {
   siteKey: string;

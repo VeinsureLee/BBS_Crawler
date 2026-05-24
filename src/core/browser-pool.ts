@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium, type Browser, type BrowserContext, type LaunchOptions } from 'playwright';
-import { logger } from '../util/logger';
+import { logger } from '../util/logger.js';
 
 export interface BrowserPoolOptions {
   headless: boolean;

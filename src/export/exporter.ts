@@ -3,9 +3,9 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { getStructureDb } from '../repository/db';
-import { DatabaseError } from '../core/errors';
-import type { ForumStructure, SectionStructure, BoardStructure } from './types';
+import { getStructureDb } from '../repository/db.js';
+import { DatabaseError } from '../core/errors.js';
+import type { ForumStructure, SectionStructure, BoardStructure } from './types.js';
 
 const FORMAT_VERSION = '1.0';
 

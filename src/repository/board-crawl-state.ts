@@ -6,9 +6,9 @@
  *   - resume incremental crawls (stop when posted_at <= latest_thread_posted_at)
  *   - report deepest page ever reached
  */
-import { getBoardDb, type Db } from './db';
-import { DatabaseError } from '../core/errors';
-import { findBoardDbPath } from './boards';
+import { getBoardDb, type Db } from './db.js';
+import { DatabaseError } from '../core/errors.js';
+import { findBoardDbPath } from './boards.js';
 
 export interface BoardCrawlState {
   boardId: number;

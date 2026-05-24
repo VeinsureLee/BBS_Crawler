@@ -8,4 +8,4 @@ export type {
   Thread,
   Post,
   PostAttachment,
-} from './core/site-adapter';
+} from './core/site-adapter.js';

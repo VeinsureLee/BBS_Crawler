@@ -10,11 +10,11 @@
  * the inserted thread id so callers can chain `upsertPosts(boardDb, ...)`
  * without paying for a second routing lookup.
  */
-import { getBoardDb, type Db } from './db';
-import { DatabaseError } from '../core/errors';
-import { resolveBoardRoute } from './boards';
-import { logger } from '../util/logger';
-import type { Thread, ThreadSummary } from '../core/site-adapter';
+import { getBoardDb, type Db } from './db.js';
+import { DatabaseError } from '../core/errors.js';
+import { resolveBoardRoute } from './boards.js';
+import { logger } from '../util/logger.js';
+import type { Thread, ThreadSummary } from '../core/site-adapter.js';
 
 export interface UpsertThreadOpts {
   isPinned: boolean;

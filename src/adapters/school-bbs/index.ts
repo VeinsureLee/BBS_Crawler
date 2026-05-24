@@ -8,11 +8,11 @@ import type {
   SectionSummary,
   ThreadSummary,
   Thread,
-} from '../../core/site-adapter';
-import { register } from '../../core/registry';
-import { loadSiteConfig, buildRouteUrl } from '../../core/site-config';
-import type { SectionChildren, Post } from '../../core/site-adapter';
-import { listThreads as listThreadsImpl, fetchBoardPage } from './listThreads';
+} from '../../core/site-adapter.js';
+import { register } from '../../core/registry.js';
+import { loadSiteConfig, buildRouteUrl } from '../../core/site-config.js';
+import type { SectionChildren, Post } from '../../core/site-adapter.js';
+import { listThreads as listThreadsImpl, fetchBoardPage } from './listThreads.js';
 
 export { fetchBoardPage };
 

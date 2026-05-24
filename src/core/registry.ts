@@ -1,5 +1,5 @@
-import { UnknownSiteError } from './errors';
-import type { SiteAdapter } from './site-adapter';
+import { UnknownSiteError } from './errors.js';
+import type { SiteAdapter } from './site-adapter.js';
 
 const adapters = new Map<string, SiteAdapter>();
 

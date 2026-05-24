@@ -1,8 +1,8 @@
 import type { Page } from 'playwright';
-import { getCredentials } from './config';
-import { MissingCredentialsError, SessionExpiredError } from './errors';
-import type { SiteAdapter } from './site-adapter';
-import { loadCredentials as loadStoredCredentialsDefault } from './credential-store';
+import { getCredentials } from './config.js';
+import { MissingCredentialsError, SessionExpiredError } from './errors.js';
+import type { SiteAdapter } from './site-adapter.js';
+import { loadCredentials as loadStoredCredentialsDefault } from './credential-store.js';
 
 export interface AuthManagerDeps {
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;
