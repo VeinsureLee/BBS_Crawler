@@ -55,6 +55,13 @@ async function doLogin() {
     content = content.replace(/charset=["']?gb2312["']?/i, 'charset="UTF-8"');
     content = content.replace(/></g, '>\n<').replace(/\n\s*\n/g, '\n');
 
+    // The exploration/ dir is gitignored, so a fresh clone won't have it.
+    // mkdir before writing so a missing dir doesn't crash login and skip
+    // the storage state save below.
+    if (!fs.existsSync(EXPLORATION_DIR)) {
+      fs.mkdirSync(EXPLORATION_DIR, { recursive: true });
+    }
+
     const filePath = path.join(EXPLORATION_DIR, 'homepage-after-login.html');
     fs.writeFileSync(filePath, content, 'utf-8');
     console.log(`Saved logged-in homepage to: ${filePath}`);
