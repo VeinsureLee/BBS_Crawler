@@ -28,20 +28,11 @@
     "refresh:stats": "tsx scripts/init/refresh-board-stats.ts",
 
     "db:check": "tsx scripts/db/check-db.ts",
-    "db:migrate:split-threads": "tsx scripts/db/migrate-split-threads.ts",
 
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
     "crawl:pinned": "tsx scripts/crawl/crawl-pinned.ts",
-    "crawl:board-skip": "tsx scripts/crawl/crawl-board-with-skip.ts",
-
-    "debug:board": "tsx scripts/debug/debug-board.ts",
-    "debug:failed-boards": "tsx scripts/debug/explore-failed-boards.ts",
-    "debug:probe-sections": "tsx scripts/debug/probe-section-names.ts",
-
-    "explore": "tsx scripts/util/explore.ts",
-    "format:html": "tsx scripts/util/format-html.ts",
-    "tail:progress": "tsx scripts/util/tail-progress.ts"
+    "crawl:board-skip": "tsx scripts/crawl/crawl-board-with-skip.ts"
   },
   "dependencies": {
     "@types/js-yaml": "^4.0.9",
