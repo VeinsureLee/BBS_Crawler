@@ -82,7 +82,7 @@ export async function resolveBoardRoute(
 /**
  * List all board nodes for a site.
  */
-export async function listBoards(siteKey: string): Promise<BoardRow[]> {
+export async function listBoardRows(siteKey: string): Promise<BoardRow[]> {
   try {
     const r = await getStructureDb().query<{ id: number; node_key: string; name: string }>(
       `SELECT id, node_key, name FROM nodes
@@ -96,7 +96,7 @@ export async function listBoards(siteKey: string): Promise<BoardRow[]> {
       name: row.name,
     }));
   } catch (e) {
-    throw new DatabaseError(`listBoards failed for ${siteKey}`, e);
+    throw new DatabaseError(`listBoardRows failed for ${siteKey}`, e);
   }
 }
 

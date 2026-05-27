@@ -31,6 +31,7 @@ export type {
 } from './read/readers.js';
 
 // ④ 持久化（进阶）
+// Repository input/result types (e.g. UpsertBoardInput, BoardCrawlState) are intentionally NOT public — consumers use the functions, not these internal bags.
 export {
   initDb, getStructureDb, getBoardDb, getDataDir, closeAllDbs,
   STRUCTURE_SCHEMA, BOARD_SCHEMA,

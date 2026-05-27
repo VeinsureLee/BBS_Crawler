@@ -30,7 +30,7 @@ import { parseConfig } from '../../src/config/app-config';
 import { loadSiteConfig } from '../../src/config/site-config';
 import { initDb, closeAllDbs, getStructureDb } from '../../src/repository/db';
 import { getAdapter } from '../../src/registry';
-import { listBoards } from '../../src/repository/boards';
+import { listBoardRows } from '../../src/repository/boards';
 import { upsertThread } from '../../src/repository/threads';
 import { upsertPosts } from '../../src/repository/posts';
 import { logger } from '../../src/util/logger';
@@ -571,7 +571,7 @@ async function main() {
   const maxPinnedThreadPages = siteConfig.crawl.maxPinnedThreadPages;
   const maxRetryPasses = siteConfig.crawl.maxRetryPasses;
 
-  let boards = await listBoards(siteKey);
+  let boards = await listBoardRows(siteKey);
   const progress = readProgress();
   const doneSet = new Set<string>(progress[siteKey] ?? []);
   const skipped: string[] = [];

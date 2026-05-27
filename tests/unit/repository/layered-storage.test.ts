@@ -20,7 +20,7 @@ import {
   upsertBoard,
   resolveBoardRoute,
   findBoardDbPath,
-  listBoards,
+  listBoardRows,
   boardsMissingPinned,
 } from '../../../src/repository/boards';
 import {
@@ -233,7 +233,7 @@ describe('layered storage — end-to-end', () => {
     const byName = await findBoardByName('s', '北邮人在上海');
     expect(byName).toEqual({ id: boardId, siteKey: 's', boardKey: 'BYRatSH', name: '北邮人在上海' });
 
-    const boards = await listBoards('s');
+    const boards = await listBoardRows('s');
     expect(boards).toHaveLength(1);
     expect(boards[0]!.boardKey).toBe('BYRatSH');
 

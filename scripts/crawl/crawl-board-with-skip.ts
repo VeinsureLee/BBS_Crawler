@@ -25,7 +25,7 @@ import { upsertPosts } from '../../src/repository/posts';
 import { appendFetchLog } from '../../src/repository/fetch-log';
 import { addRedactedSecret, logger } from '../../src/util/logger';
 import { shouldSkipFetch, getCrawledThreadUrls } from '../../src/repository/threads';
-import { listBoards } from '../../src/repository/boards';
+import { listBoardRows } from '../../src/repository/boards';
 
 const config = loadSiteConfig('school-bbs');
 
@@ -84,7 +84,7 @@ async function main() {
   logger.info({ boardKey, freshnessHours, script: 'crawl-board-with-skip' }, `crawl-board: 列出版面 ${boardKey}`);
   try {
     // listThreadsByName 需要版面显示名；脚本入参是 boardKey，先反查。
-    const boards = await listBoards('school-bbs');
+    const boards = await listBoardRows('school-bbs');
     const board = boards.find((b) => b.boardKey === boardKey);
     if (!board || !board.name) {
       throw new Error(`board "${boardKey}" not found in DB. Run init:boards first.`);
