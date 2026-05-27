@@ -16,7 +16,7 @@ beforeEach(async () => {
   initDb({ dataDir: dir });
   await upsertSite({ siteKey: 's', displayName: 'S', baseUrl: 'https://x' });
   const { sectionId } = await upsertSection({ siteKey: 's', sectionKey: 'F', name: '讨论区F' });
-  const { boardId } = await upsertBoard({ siteKey: 's', boardKey: 'B1', name: '版面1', sectionId });
+  await upsertBoard({ siteKey: 's', boardKey: 'B1', name: '版面1', sectionId, moderators: ['张三'] });
   await upsertThreadSummary('s', { board: 'B1', url: 'https://x/article/B1/1', title: '置顶A', postedAt: '2026-05-01T00:00:00Z', raw: { isPinned: true } } as any, { isPinned: true });
   await upsertThreadSummary('s', { board: 'B1', url: 'https://x/article/B1/2', title: '普通B', postedAt: '2026-05-02T00:00:00Z' } as any, { isPinned: false });
 });
@@ -32,5 +32,27 @@ describe('getSectionDetail', () => {
     expect(b.pinnedThreadTitles).toContain('置顶A');
     expect(b.recentThreads.map((t) => t.title)).toContain('普通B');
     expect(b.recentThreads.find((t) => t.title === '置顶A')).toBeUndefined();
+  });
+
+  it('exposes board moderators (folded in via listBoards)', async () => {
+    const d = await getSectionDetail('s', 'F', { recentLimit: 5 });
+    expect(d.boards[0]!.moderators).toContain('张三');
+  });
+
+  it('returns null stats when no daily_traffic recorded', async () => {
+    const d = await getSectionDetail('s', 'F', { recentLimit: 5 });
+    expect(d.boards[0]!.stats).toBeNull();
+  });
+
+  it('throws when the section does not exist', async () => {
+    await expect(getSectionDetail('s', 'MISSING')).rejects.toThrow();
+  });
+
+  it('truncates recentThreads to recentLimit, newest first', async () => {
+    await upsertThreadSummary('s', { board: 'B1', url: 'https://x/article/B1/3', title: '普通C', postedAt: '2026-05-03T00:00:00Z' } as any, { isPinned: false });
+    const d = await getSectionDetail('s', 'F', { recentLimit: 1 });
+    const b = d.boards[0]!;
+    expect(b.recentThreads).toHaveLength(1);
+    expect(b.recentThreads[0]!.title).toBe('普通C');
   });
 });

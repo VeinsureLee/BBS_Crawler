@@ -1,10 +1,14 @@
 import { getStructureDb, getBoardDb } from '../repository/db.js';
 import { findBoardDbPath } from '../repository/boards.js';
+import { getLatestDailyTraffic, type DailyTrafficRow } from '../repository/daily-traffic.js';
 import { DatabaseError } from '../errors.js';
+
+/** Upper bound on pinned-thread titles fetched per board for getSectionDetail. */
+const MAX_PINNED_TITLES = 500;
 
 export interface SiteInfo { siteKey: string; displayName: string; baseUrl: string; }
 export interface SectionInfo { id: number; sectionKey: string; name: string; type: 'forum' | 'sub_forum'; level: number; fullPath: string | null; parentId: number | null; }
-export interface BoardInfo { id: number; boardKey: string; name: string; parentId: number | null; dbPath: string | null; }
+export interface BoardInfo { id: number; boardKey: string; name: string; parentId: number | null; dbPath: string | null; moderators: string[]; }
 export interface ThreadRow {
   id: number; url: string; title: string; author: string | null;
   postedAt: string | null; lastReplyAt: string | null;
@@ -41,13 +45,14 @@ export async function listSections(siteKey: string): Promise<SectionInfo[]> {
 /** Board nodes, optionally only those directly under `parentId`. */
 export async function listBoards(siteKey: string, parentId?: number): Promise<BoardInfo[]> {
   const sql = parentId === undefined
-    ? `SELECT id, node_key, name, parent_id, db_path FROM nodes WHERE site_key = $1 AND type = 'board' ORDER BY id`
-    : `SELECT id, node_key, name, parent_id, db_path FROM nodes WHERE site_key = $1 AND type = 'board' AND parent_id = $2 ORDER BY id`;
+    ? `SELECT id, node_key, name, parent_id, db_path, moderators FROM nodes WHERE site_key = $1 AND type = 'board' ORDER BY id`
+    : `SELECT id, node_key, name, parent_id, db_path, moderators FROM nodes WHERE site_key = $1 AND type = 'board' AND parent_id = $2 ORDER BY id`;
   const params = parentId === undefined ? [siteKey] : [siteKey, parentId];
-  const r = await getStructureDb().query<{ id: number; node_key: string; name: string; parent_id: number | null; db_path: string | null }>(sql, params);
+  const r = await getStructureDb().query<{ id: number; node_key: string; name: string; parent_id: number | null; db_path: string | null; moderators: string | null }>(sql, params);
   return r.rows.map((x) => ({
     id: Number(x.id), boardKey: x.node_key, name: x.name,
     parentId: x.parent_id === null ? null : Number(x.parent_id), dbPath: x.db_path,
+    moderators: x.moderators ? JSON.parse(x.moderators) : [],
   }));
 }
 
@@ -124,8 +129,6 @@ export async function getThreadByUrl(siteKey: string, url: string): Promise<{ th
 
 export { findBoardByName, getBoardById } from '../repository/boards-lookup.js';
 
-import { getLatestDailyTraffic, type DailyTrafficRow } from '../repository/daily-traffic.js';
-
 export interface SectionDetailBoard {
   id: number; boardKey: string; name: string; moderators: string[];
   stats: DailyTrafficRow | null; pinnedThreadTitles: string[]; recentThreads: ThreadRow[];
@@ -155,16 +158,14 @@ export async function getSectionDetail(
   const boardsRaw = await listBoards(siteKey, sectionId);
 
   const boards: SectionDetailBoard[] = [];
+  // Each board is its own SQLite file, so we query boards sequentially here.
+  // Could be parallelised with Promise.all in future if it becomes a hotspot.
   for (const b of boardsRaw) {
-    const modRow = await getStructureDb().query<{ moderators: string | null }>(
-      `SELECT moderators FROM nodes WHERE id = $1`, [b.id],
-    );
-    const moderators = modRow.rows[0]?.moderators ? JSON.parse(modRow.rows[0]!.moderators!) : [];
     const stats = await getLatestDailyTraffic(b.id).catch(() => null);
-    const pinned = await listThreadsByBoard(b.id, { kind: 'pinned', limit: 100 });
+    const pinned = await listThreadsByBoard(b.id, { kind: 'pinned', limit: MAX_PINNED_TITLES });
     const recentThreads = await listThreadsByBoard(b.id, { kind: 'plain', limit: recentLimit });
     boards.push({
-      id: b.id, boardKey: b.boardKey, name: b.name, moderators,
+      id: b.id, boardKey: b.boardKey, name: b.name, moderators: b.moderators,
       stats, pinnedThreadTitles: pinned.map((t) => t.title), recentThreads,
     });
   }
