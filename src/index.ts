@@ -30,8 +30,6 @@ export type {
   CrawlerServiceDeps,
   FetchThreadInput,
   FetchThreadOutput,
-  ListThreadsInput,
-  ListThreadsOutput,
   ListThreadsByNameInput,
   ListThreadsByNameOutput,
   FetchThreadByIdInput,

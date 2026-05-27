@@ -60,15 +60,6 @@ export interface FetchThreadOutput {
   threadId?: number | undefined;
 }
 
-export interface ListThreadsInput extends ListParams { siteKey: string; persist?: boolean | undefined; }
-export interface ListThreadsOutput {
-  siteKey: string;
-  fetchedAt: string;
-  results: ThreadSummary[];
-  page: number;
-  hasMore: boolean;
-  persisted: boolean;
-}
 
 export interface ListThreadsByNameInput {
   siteKey: string;
@@ -129,23 +120,6 @@ export class CrawlerService {
     });
   }
 
-  async listThreads(input: ListThreadsInput): Promise<ListThreadsOutput> {
-    return this.run('forum_list_threads', input.siteKey, input as unknown as Record<string, unknown>, async (page, adapter) => {
-      const params: { board?: string; page?: number; pageSize?: number } = {};
-      if (input.board !== undefined) params.board = input.board;
-      if (input.page !== undefined) params.page = input.page;
-      if (input.pageSize !== undefined) params.pageSize = input.pageSize;
-      const results = await adapter.listThreads(page, params);
-      return {
-        siteKey: input.siteKey,
-        fetchedAt: new Date().toISOString(),
-        results,
-        page: input.page ?? 1,
-        hasMore: results.length > 0,
-        persisted: false,
-      };
-    });
-  }
 
   /**
    * Crawl a board by exact display name with two modes:
