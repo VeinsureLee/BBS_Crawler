@@ -20,7 +20,7 @@ import { upsertPosts } from '../repository/posts.js';
 import { upsertDailyTraffic } from '../repository/daily-traffic.js';
 import { findBoardByName } from '../repository/boards-lookup.js';
 import { getStructureDb } from '../repository/db.js';
-import { loadSiteConfig, loadSiteEntries, validateConfigConsistency } from './site-config.js';
+import { loadSiteConfig, loadSiteEntries, validateConfigConsistency } from '../config/site-config.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));

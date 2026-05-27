@@ -9,7 +9,7 @@
 import 'dotenv/config';
 import '../../src/adapters/index';
 import * as path from 'path';
-import { parseConfig } from '../../src/core/config';
+import { parseConfig } from '../../src/config/app-config';
 import { initDb, closeAllDbs } from '../../src/repository/db';
 import { exportForumStructure } from '../../src/export/exporter';
 import { logger } from '../../src/util/logger';

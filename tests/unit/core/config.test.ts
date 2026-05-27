@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseConfig, credentialEnvKeys, getCredentials } from '../../../src/core/config';
+import { parseConfig, credentialEnvKeys, getCredentials } from '../../../src/config/app-config';
 import { MissingCredentialsError } from '../../../src/errors';
 
 describe('parseConfig', () => {

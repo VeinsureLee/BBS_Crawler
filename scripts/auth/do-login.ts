@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadSiteConfig } from '../../src/core/site-config';
+import { loadSiteConfig } from '../../src/config/site-config';
 
 const config = loadSiteConfig('school-bbs');
 const ui = config.selectors;

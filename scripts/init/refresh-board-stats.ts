@@ -19,7 +19,7 @@ import '../../src/adapters/index';
 import * as fs from 'fs';
 import * as path from 'path';
 import { chromium } from 'playwright';
-import { parseConfig } from '../../src/core/config';
+import { parseConfig } from '../../src/config/app-config';
 import { initDb, closeAllDbs } from '../../src/repository/db';
 import { runRefreshBoardStats, type RefreshBoardStatsOpts } from '../../src/core/init-runners';
 import { logger } from '../../src/util/logger';

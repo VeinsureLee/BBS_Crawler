@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { getCredentials } from './config.js';
+import { getCredentials } from '../config/app-config.js';
 import { SessionExpiredError } from '../errors.js';
 import type { SiteAdapter } from '../contract/site-adapter.js';
 

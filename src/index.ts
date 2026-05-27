@@ -48,7 +48,7 @@ export { AuthManager } from './core/auth-manager.js';
 export { BrowserPool } from './core/browser-pool.js';
 export { createRateLimiter } from './core/rate-limiter.js';
 export { listAdapters, getAdapter } from './registry.js';
-export { parseConfig } from './core/config.js';
+export { parseConfig } from './config/app-config.js';
 
 // Errors
 export {

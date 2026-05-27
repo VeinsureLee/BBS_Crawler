@@ -11,7 +11,7 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
-import { parseConfig } from '../../src/core/config';
+import { parseConfig } from '../../src/config/app-config';
 import { initDb, getStructureDb, getBoardDb, closeAllDbs } from '../../src/repository/db';
 import type { Db } from '../../src/repository/db';
 

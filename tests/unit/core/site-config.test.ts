@@ -7,7 +7,7 @@ import {
   loadNodeTypes,
   validateConfigConsistency,
   _resetForTests,
-} from '../../../src/core/site-config';
+} from '../../../src/config/site-config';
 
 function write(file: string, content: string): void {
   fs.writeFileSync(file, content, 'utf-8');

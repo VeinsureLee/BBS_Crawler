@@ -14,7 +14,7 @@ import '../../src/adapters/index';
 import { chromium } from 'playwright';
 import * as path from 'path';
 import { initDb, closeAllDbs } from '../../src/repository/db';
-import { loadSiteConfig } from '../../src/core/site-config';
+import { loadSiteConfig } from '../../src/config/site-config';
 import { BrowserPool } from '../../src/core/browser-pool';
 import { createRateLimiter } from '../../src/core/rate-limiter';
 import { AuthManager } from '../../src/core/auth-manager';

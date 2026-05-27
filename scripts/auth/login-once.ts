@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { parseConfig } from '../../src/core/config.js';
+import { parseConfig } from '../../src/config/app-config.js';
 import { BrowserPool } from '../../src/core/browser-pool.js';
 import { AuthManager } from '../../src/core/auth-manager.js';
 import { getAdapter } from '../../src/registry.js';

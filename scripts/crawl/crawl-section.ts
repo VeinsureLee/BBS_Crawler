@@ -14,7 +14,7 @@ import 'dotenv/config';
 import { chromium } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadSiteConfig, buildRouteUrl } from '../../src/core/site-config';
+import { loadSiteConfig, buildRouteUrl } from '../../src/config/site-config';
 import { logger } from '../../src/util/logger';
 
 const config = loadSiteConfig('school-bbs');
