@@ -25,6 +25,7 @@ import { upsertPosts } from '../../src/repository/posts';
 import { appendFetchLog } from '../../src/repository/fetch-log';
 import { addRedactedSecret, logger } from '../../src/util/logger';
 import { shouldSkipFetch, getCrawledThreadUrls } from '../../src/repository/threads';
+import { listBoards } from '../../src/repository/boards';
 
 const config = loadSiteConfig('school-bbs');
 
@@ -82,20 +83,27 @@ async function main() {
   const startedAt = Date.now();
   logger.info({ boardKey, freshnessHours, script: 'crawl-board-with-skip' }, `crawl-board: 列出版面 ${boardKey}`);
   try {
-    const listResult = await crawler.listThreads({
+    // listThreadsByName 需要版面显示名；脚本入参是 boardKey，先反查。
+    const boards = await listBoards('school-bbs');
+    const board = boards.find((b) => b.boardKey === boardKey);
+    if (!board || !board.name) {
+      throw new Error(`board "${boardKey}" not found in DB. Run init:boards first.`);
+    }
+    const listResult = await crawler.listThreadsByName({
       siteKey: 'school-bbs',
-      board: boardKey,
-      page: 1,
+      boardName: board.name,
+      mode: 'pages',
+      pages: 1,
     });
 
-    logger.info({ boardKey, found: listResult.results.length }, `首页发现 ${listResult.results.length} 帖`);
+    logger.info({ boardKey, found: listResult.threads.length }, `首页发现 ${listResult.threads.length} 帖`);
 
     // Get already crawled URLs for quick filtering.
     const crawledUrls = await getCrawledThreadUrls('school-bbs', boardKey);
     logger.info({ boardKey, alreadyCrawled: crawledUrls.size }, `本版已爬 ${crawledUrls.size} 帖`);
 
     const toFetch = [];
-    for (const summary of listResult.results) {
+    for (const summary of listResult.threads) {
       const skipResult = await shouldSkipFetch(
         'school-bbs',
         boardKey,
@@ -113,7 +121,7 @@ async function main() {
 
     logger.info({ toFetch: toFetch.length }, `准备抓取 ${toFetch.length} 帖`);
     let successCount = 0;
-    const skipCount = listResult.results.length - toFetch.length;
+    const skipCount = listResult.threads.length - toFetch.length;
 
     for (const summary of toFetch) {
       try {
