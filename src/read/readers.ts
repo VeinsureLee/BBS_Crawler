@@ -123,3 +123,54 @@ export async function getThreadByUrl(siteKey: string, url: string): Promise<{ th
 }
 
 export { findBoardByName, getBoardById } from '../repository/boards-lookup.js';
+
+import { getLatestDailyTraffic, type DailyTrafficRow } from '../repository/daily-traffic.js';
+
+export interface SectionDetailBoard {
+  id: number; boardKey: string; name: string; moderators: string[];
+  stats: DailyTrafficRow | null; pinnedThreadTitles: string[]; recentThreads: ThreadRow[];
+}
+export interface SectionDetail {
+  section: { id: number; sectionKey: string; name: string; level: number; fullPath: string | null };
+  subSections: SectionInfo[];
+  boards: SectionDetailBoard[];
+}
+
+export async function getSectionDetail(
+  siteKey: string, sectionKey: string, opts: { recentLimit?: number } = {},
+): Promise<SectionDetail> {
+  const recentLimit = opts.recentLimit ?? 10;
+  const sr = await getStructureDb().query<{
+    id: number; node_key: string; name: string; level: number; full_path: string | null;
+  }>(
+    `SELECT id, node_key, name, level, full_path FROM nodes
+      WHERE site_key = $1 AND node_key = $2 AND type IN ('forum','sub_forum') LIMIT 1`,
+    [siteKey, sectionKey],
+  );
+  const s = sr.rows[0];
+  if (!s) throw new DatabaseError(`section "${sectionKey}" not found in ${siteKey}`);
+  const sectionId = Number(s.id);
+
+  const subSections = (await listSections(siteKey)).filter((x) => x.parentId === sectionId);
+  const boardsRaw = await listBoards(siteKey, sectionId);
+
+  const boards: SectionDetailBoard[] = [];
+  for (const b of boardsRaw) {
+    const modRow = await getStructureDb().query<{ moderators: string | null }>(
+      `SELECT moderators FROM nodes WHERE id = $1`, [b.id],
+    );
+    const moderators = modRow.rows[0]?.moderators ? JSON.parse(modRow.rows[0]!.moderators!) : [];
+    const stats = await getLatestDailyTraffic(b.id).catch(() => null);
+    const pinned = await listThreadsByBoard(b.id, { kind: 'pinned', limit: 100 });
+    const recentThreads = await listThreadsByBoard(b.id, { kind: 'plain', limit: recentLimit });
+    boards.push({
+      id: b.id, boardKey: b.boardKey, name: b.name, moderators,
+      stats, pinnedThreadTitles: pinned.map((t) => t.title), recentThreads,
+    });
+  }
+
+  return {
+    section: { id: sectionId, sectionKey: s.node_key, name: s.name, level: Number(s.level), fullPath: s.full_path },
+    subSections, boards,
+  };
+}
