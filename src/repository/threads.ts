@@ -14,7 +14,7 @@ import { getBoardDb, type Db } from './db.js';
 import { DatabaseError } from '../core/errors.js';
 import { resolveBoardRoute } from './boards.js';
 import { logger } from '../util/logger.js';
-import type { Thread, ThreadSummary } from '../core/site-adapter.js';
+import type { Thread, ThreadSummary } from '../contract/site-adapter.js';
 
 export interface UpsertThreadOpts {
   isPinned: boolean;

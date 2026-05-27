@@ -6,7 +6,7 @@
  */
 import type { Db } from './db.js';
 import { DatabaseError } from '../core/errors.js';
-import type { Post } from '../core/site-adapter.js';
+import type { Post } from '../contract/site-adapter.js';
 
 /**
  * Insert/update floors for a thread row. Idempotent — re-running with the

@@ -4,7 +4,7 @@ import type {
   Thread,
   ThreadSummary,
   ListParams,
-} from './site-adapter.js';
+} from '../contract/site-adapter.js';
 import {
   SessionExpiredError,
   NavigationTimeoutError,

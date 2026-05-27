@@ -7,10 +7,10 @@ import type {
   SectionSummary,
   ThreadSummary,
   Thread,
-} from '../../core/site-adapter.js';
+} from '../../contract/site-adapter.js';
 import { register } from '../../core/registry.js';
 import { loadSiteConfig, buildRouteUrl } from '../../core/site-config.js';
-import type { SectionChildren, Post } from '../../core/site-adapter.js';
+import type { SectionChildren, Post } from '../../contract/site-adapter.js';
 import { listThreads as listThreadsImpl, fetchBoardPage } from './listThreads.js';
 
 export { fetchBoardPage };

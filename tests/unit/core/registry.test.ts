@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { register, getAdapter, listAdapters, _resetForTests } from '../../../src/core/registry';
 import { UnknownSiteError } from '../../../src/core/errors';
-import type { SiteAdapter } from '../../../src/core/site-adapter';
+import type { SiteAdapter } from '../../../src/contract/site-adapter';
 
 const fakeAdapter = (siteKey: string): SiteAdapter => ({
   siteKey,

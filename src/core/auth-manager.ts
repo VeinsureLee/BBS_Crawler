@@ -1,7 +1,7 @@
 import type { Page } from 'playwright';
 import { getCredentials } from './config.js';
 import { SessionExpiredError } from './errors.js';
-import type { SiteAdapter } from './site-adapter.js';
+import type { SiteAdapter } from '../contract/site-adapter.js';
 
 export interface AuthManagerDeps {
   env: NodeJS.ProcessEnv | Record<string, string | undefined>;

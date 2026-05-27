@@ -10,7 +10,7 @@
 import { getBoardDb, type Db } from './db.js';
 import { DatabaseError } from '../core/errors.js';
 import { findBoardDbPath } from './boards.js';
-import type { BoardStats } from '../core/site-adapter.js';
+import type { BoardStats } from '../contract/site-adapter.js';
 
 export interface DailyTrafficRow {
   boardNodeId: number;

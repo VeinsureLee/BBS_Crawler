@@ -22,7 +22,7 @@ export type {
   BoardSummary,
   BoardStats,
   SectionChildren,
-} from './core/site-adapter.js';
+} from './contract/site-adapter.js';
 
 // Core services
 export { CrawlerService } from './core/crawler-service.js';
