@@ -2,6 +2,13 @@
 
 Playwright + 分层 SQLite 的 BBS 爬虫库，作为 BBS_MCP 的可嵌入组件。
 
+## 环境要求
+
+- **Node.js ≥ 20**（推荐 LTS 20 / 22；24 亦支持）。
+- 原生依赖 `better-sqlite3`（`^12`）随包提供预编译二进制，覆盖 Node 20 / 22 / 24（win/mac/linux、x64/arm64），`npm install` 通常直接下载、**无需本机编译**。
+- 若所在平台 / Node 版本没有现成预编译包，`npm install` 会回退到源码编译，此时需要本机具备 **Python 3** + **C/C++ 构建工具链**（Windows：安装 Visual Studio Build Tools 并勾选 *Desktop development with C++*）。装好后重装或 `npm rebuild better-sqlite3` 即可。
+- 备注：旧版（better-sqlite3 11.x）没有 Node 24 的预编译包，在 Node 24 上 fresh clone 必须本机编译——升到 12.x 后此问题消失。
+
 ## 功能总览
 
 | 能力 | 入口命令 |
