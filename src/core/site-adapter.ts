@@ -14,7 +14,6 @@ export interface SiteAdapter {
   listPinnedThreadIds?(page: Page, boardKey: string): Promise<string[]>;
   listThreads(page: Page, params: ListParams): Promise<ThreadSummary[]>;
   getThread(page: Page, params: GetThreadParams): Promise<Thread>;
-  search(page: Page, params: SearchParams): Promise<ThreadSummary[]>;
 
   ping?(page: Page): Promise<boolean>;
 }
@@ -34,11 +33,6 @@ export interface GetThreadParams {
   url: string;
   maxReplies?: number | undefined;
   maxPages?: number | undefined;
-}
-
-export interface SearchParams {
-  keyword: string;
-  page?: number | undefined;
 }
 
 export interface SectionSummary {

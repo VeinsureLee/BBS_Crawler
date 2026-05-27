@@ -4,7 +4,6 @@ import type {
   LoginCredentials,
   ListParams,
   GetThreadParams,
-  SearchParams,
   SectionSummary,
   ThreadSummary,
   Thread,
@@ -457,11 +456,6 @@ async function getThread(page: Page, params: GetThreadParams): Promise<Thread> {
   };
 }
 
-async function search(page: Page, params: SearchParams): Promise<ThreadSummary[]> {
-  // TODO: implement after analyzing search functionality
-  return [];
-}
-
 const adapter: SiteAdapter = {
   siteKey,
   displayName,
@@ -474,7 +468,6 @@ const adapter: SiteAdapter = {
   listPinnedThreadIds,
   listThreads,
   getThread,
-  search,
 };
 
 register(adapter);

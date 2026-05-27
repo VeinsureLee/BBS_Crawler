@@ -4,7 +4,6 @@ import type {
   Thread,
   ThreadSummary,
   ListParams,
-  SearchParams,
 } from './site-adapter.js';
 import {
   SessionExpiredError,
@@ -63,16 +62,6 @@ export interface FetchThreadOutput {
 
 export interface ListThreadsInput extends ListParams { siteKey: string; persist?: boolean | undefined; }
 export interface ListThreadsOutput {
-  siteKey: string;
-  fetchedAt: string;
-  results: ThreadSummary[];
-  page: number;
-  hasMore: boolean;
-  persisted: boolean;
-}
-
-export interface SearchInput extends SearchParams { siteKey: string; persist?: boolean | undefined; }
-export interface SearchOutput {
   siteKey: string;
   fetchedAt: string;
   results: ThreadSummary[];
@@ -147,22 +136,6 @@ export class CrawlerService {
       if (input.page !== undefined) params.page = input.page;
       if (input.pageSize !== undefined) params.pageSize = input.pageSize;
       const results = await adapter.listThreads(page, params);
-      return {
-        siteKey: input.siteKey,
-        fetchedAt: new Date().toISOString(),
-        results,
-        page: input.page ?? 1,
-        hasMore: results.length > 0,
-        persisted: false,
-      };
-    });
-  }
-
-  async search(input: SearchInput): Promise<SearchOutput> {
-    return this.run('forum_search', input.siteKey, input as unknown as Record<string, unknown>, async (page, adapter) => {
-      const params: { keyword: string; page?: number } = { keyword: input.keyword };
-      if (input.page !== undefined) params.page = input.page;
-      const results = await adapter.search(page, params);
       return {
         siteKey: input.siteKey,
         fetchedAt: new Date().toISOString(),

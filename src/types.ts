@@ -3,7 +3,6 @@ export type {
   LoginCredentials,
   ListParams,
   GetThreadParams,
-  SearchParams,
   ThreadSummary,
   Thread,
   Post,

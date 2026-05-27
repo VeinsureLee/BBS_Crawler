@@ -16,7 +16,6 @@ function makeAdapter(thread: Thread): SiteAdapter {
     isLoggedIn: vi.fn().mockResolvedValue(true),
     login: vi.fn().mockResolvedValue(undefined),
     listThreads: vi.fn(),
-    search: vi.fn(),
     getThread: vi.fn().mockResolvedValue(thread),
   } as unknown as SiteAdapter;
 }
