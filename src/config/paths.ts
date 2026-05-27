@@ -46,6 +46,12 @@ export function resolveSiteConfigDir(opts: PathOptions): string {
   return bundledSiteConfigDir();
 }
 
+/**
+ * Resolve the data directory. The env var read here (and written by
+ * `loadAndResolvePaths`) is `DATABASE_PATH` — the same name `parseConfig`
+ * consumes; `dataDir` is just our alias for it. Precedence: explicit
+ * `opts.dataDir` > `DATABASE_PATH` env > `<dir of .env>/data`.
+ */
 export function resolveDataDir(opts: PathOptions, envFile: string | null): string {
   if (opts.dataDir) return opts.dataDir;
   if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH;
