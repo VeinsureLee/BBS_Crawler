@@ -1,11 +1,6 @@
 /**
- * Init runners — the work behind `npm run init:*` scripts, factored out so
- * the InitOrchestrator can reuse them when an MCP tool call hits an empty
- * or partially-initialized DB.
- *
- * Each runner takes an already-logged-in Playwright Page (the orchestrator
- * acquires it via the browser pool + AuthManager). They write to the same
- * sections / boards / threads tables the standalone scripts target.
+ * Init runners — the work behind `npm run init:*` scripts and the public
+ * runInit* API. Each runner takes an already-logged-in Playwright Page.
  */
 import type { Page } from 'playwright';
 import { getAdapter } from './registry.js';

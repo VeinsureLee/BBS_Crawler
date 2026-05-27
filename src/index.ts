@@ -34,8 +34,6 @@ export type {
   ListThreadsByNameOutput,
   FetchThreadByIdInput,
 } from './core/crawler-service.js';
-export { InitOrchestrator } from './core/init-orchestrator.js';
-export type { InitOrchestratorDeps } from './core/init-orchestrator.js';
 export {
   runInitSections,
   runInitBoards,
