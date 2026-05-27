@@ -18,6 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { z } from 'zod';
+import { bundledSiteConfigDir } from './paths.js';
 
 const LoginSelectorsSchema = z.object({
   form: z.string(),
@@ -106,7 +107,7 @@ export type NodeTypes = z.infer<typeof NodeTypesSchema>;
  * Production reads the default ./config/sites/.
  */
 function getConfigDir(): string {
-  return process.env.SITE_CONFIG_DIR ?? path.join(process.cwd(), 'config', 'sites');
+  return process.env.SITE_CONFIG_DIR ?? bundledSiteConfigDir();
 }
 
 const siteConfigCache = new Map<string, SiteConfig>();
