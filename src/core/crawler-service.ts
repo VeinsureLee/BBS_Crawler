@@ -11,7 +11,7 @@ import {
   RateLimitedError,
   BoardNotFoundError,
   FetchFailedError,
-} from './errors.js';
+} from '../errors.js';
 import { logger } from '../util/logger.js';
 import { upsertThreadSummary } from '../repository/threads.js';
 import { findBoardByName } from '../repository/boards-lookup.js';

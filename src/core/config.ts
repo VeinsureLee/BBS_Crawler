@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MissingCredentialsError } from './errors.js';
+import { MissingCredentialsError } from '../errors.js';
 
 const boolFromEnv = z.preprocess((v) => {
   if (typeof v !== 'string') return v;

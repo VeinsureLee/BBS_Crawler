@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseConfig, credentialEnvKeys, getCredentials } from '../../../src/core/config';
-import { MissingCredentialsError } from '../../../src/core/errors';
+import { MissingCredentialsError } from '../../../src/errors';
 
 describe('parseConfig', () => {
   it('parses minimal env with defaults', () => {

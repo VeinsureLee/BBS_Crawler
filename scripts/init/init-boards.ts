@@ -17,7 +17,7 @@ import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteConfig } from '../../src/core/site-config';
 import { initDb, closeAllDbs } from '../../src/repository/db';
-import { getAdapter } from '../../src/core/registry';
+import { getAdapter } from '../../src/registry';
 import { listTopLevelSections, upsertSection } from '../../src/repository/sections';
 import { upsertBoard } from '../../src/repository/boards';
 import { upsertDailyTraffic } from '../../src/repository/daily-traffic';

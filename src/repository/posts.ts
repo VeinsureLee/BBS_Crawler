@@ -5,7 +5,7 @@
  * → board-db lookup.
  */
 import type { Db } from './db.js';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 import type { Post } from '../contract/site-adapter.js';
 
 /**

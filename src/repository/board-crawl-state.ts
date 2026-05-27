@@ -7,7 +7,7 @@
  *   - report deepest page ever reached
  */
 import { getBoardDb, type Db } from './db.js';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 import { findBoardDbPath } from './boards.js';
 
 export interface BoardCrawlState {

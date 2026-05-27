@@ -1,5 +1,5 @@
 import { getStructureDb } from './db.js';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 
 export type FetchLogStatus = 'ok' | 'error' | 'rate_limited';
 

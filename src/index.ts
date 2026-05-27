@@ -47,7 +47,7 @@ export type {
 export { AuthManager } from './core/auth-manager.js';
 export { BrowserPool } from './core/browser-pool.js';
 export { createRateLimiter } from './core/rate-limiter.js';
-export { listAdapters, getAdapter } from './core/registry.js';
+export { listAdapters, getAdapter } from './registry.js';
 export { parseConfig } from './core/config.js';
 
 // Errors
@@ -63,7 +63,7 @@ export {
   DatabaseError,
   BoardNotFoundError,
   FetchFailedError,
-} from './core/errors.js';
+} from './errors.js';
 
 // Database
 export {

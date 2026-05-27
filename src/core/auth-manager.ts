@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import { getCredentials } from './config.js';
-import { SessionExpiredError } from './errors.js';
+import { SessionExpiredError } from '../errors.js';
 import type { SiteAdapter } from '../contract/site-adapter.js';
 
 export interface AuthManagerDeps {

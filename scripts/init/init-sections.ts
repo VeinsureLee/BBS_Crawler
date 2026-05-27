@@ -18,7 +18,7 @@ import { chromium } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteEntries, validateConfigConsistency } from '../../src/core/site-config';
 import { initDb, closeAllDbs } from '../../src/repository/db';
-import { getAdapter } from '../../src/core/registry';
+import { getAdapter } from '../../src/registry';
 import { upsertSite } from '../../src/repository/sites';
 import { upsertSection } from '../../src/repository/sections';
 import { logger } from '../../src/util/logger';

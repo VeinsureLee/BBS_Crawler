@@ -22,7 +22,7 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 
 export interface QueryResult<T = Record<string, unknown>> {
   rows: T[];

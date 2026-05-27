@@ -10,7 +10,7 @@
  * board db) is the single source of truth for online / today / threads / posts.
  */
 import { getStructureDb } from './db.js';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 import { logger } from '../util/logger.js';
 import { safeFileName } from './sections.js';
 

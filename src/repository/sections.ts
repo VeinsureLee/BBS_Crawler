@@ -10,7 +10,7 @@
  * created lazily on first board write, no .db file lives at this level.
  */
 import { getStructureDb } from './db.js';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 
 export interface UpsertSectionInput {
   siteKey: string;

@@ -9,7 +9,7 @@ import {
   SelectorMissingError,
   UnknownSiteError,
   DatabaseError,
-} from '../../../src/core/errors';
+} from '../../../src/errors';
 
 describe('error classes', () => {
   it('MissingCredentialsError carries code and missingEnvKeys', () => {

@@ -19,7 +19,7 @@ import { BrowserPool } from '../../src/core/browser-pool';
 import { createRateLimiter } from '../../src/core/rate-limiter';
 import { AuthManager } from '../../src/core/auth-manager';
 import { CrawlerService } from '../../src/core/crawler-service';
-import { getAdapter } from '../../src/core/registry';
+import { getAdapter } from '../../src/registry';
 import { upsertThread } from '../../src/repository/threads';
 import { upsertPosts } from '../../src/repository/posts';
 import { appendFetchLog } from '../../src/repository/fetch-log';

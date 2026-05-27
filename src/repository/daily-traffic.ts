@@ -8,7 +8,7 @@
  * are persisted; `nodes` no longer carries a `stats` column.
  */
 import { getBoardDb, type Db } from './db.js';
-import { DatabaseError } from '../core/errors.js';
+import { DatabaseError } from '../errors.js';
 import { findBoardDbPath } from './boards.js';
 import type { BoardStats } from '../contract/site-adapter.js';
 

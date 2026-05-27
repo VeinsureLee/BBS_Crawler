@@ -5,7 +5,7 @@ import {
   SessionExpiredError,
   NavigationTimeoutError,
   RateLimitedError,
-} from '../../../src/core/errors';
+} from '../../../src/errors';
 
 function makeAdapter(thread: Thread): SiteAdapter {
   return {

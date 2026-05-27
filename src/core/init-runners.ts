@@ -3,7 +3,7 @@
  * runInit* API. Each runner takes an already-logged-in Playwright Page.
  */
 import type { Page } from 'playwright';
-import { getAdapter } from './registry.js';
+import { getAdapter } from '../registry.js';
 import { logger } from '../util/logger.js';
 import { upsertSite } from '../repository/sites.js';
 import {

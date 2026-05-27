@@ -29,7 +29,7 @@ import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/core/config';
 import { loadSiteConfig } from '../../src/core/site-config';
 import { initDb, closeAllDbs, getStructureDb } from '../../src/repository/db';
-import { getAdapter } from '../../src/core/registry';
+import { getAdapter } from '../../src/registry';
 import { listBoards } from '../../src/repository/boards';
 import { upsertThread } from '../../src/repository/threads';
 import { upsertPosts } from '../../src/repository/posts';
