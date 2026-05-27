@@ -71,7 +71,46 @@ export async function runInitSections(
 }
 
 /**
- * Crawl boards (and one level of sub-sections) for `sections`. If `sections`
+ * Module-private recursive helper for `runInitBoards`.
+ * Descends arbitrarily deep into sub-sections, persisting boards and sections.
+ * Uses a `visited` set to guard against cycles and self-references.
+ */
+async function crawlSectionRecursive(
+  page: Page,
+  adapter: ReturnType<typeof getAdapter>,
+  siteKey: string,
+  parentSectionId: number,
+  parentSectionKey: string,
+  requestIntervalMs: number,
+  depth: number,
+  visited: Set<string>,
+): Promise<void> {
+  if (visited.has(parentSectionKey)) {
+    logger.warn({ parentSectionKey, depth }, `已访问过 ${parentSectionKey}，跳过避免环`);
+    return;
+  }
+  visited.add(parentSectionKey);
+  const children = await adapter.listSectionChildren!(page, parentSectionKey);
+  for (const b of children.boards) {
+    const { boardId } = await upsertBoard({
+      siteKey, boardKey: b.boardKey, name: b.name,
+      sectionId: parentSectionId, moderators: b.moderators,
+    });
+    await upsertDailyTraffic(boardId, b.stats);
+  }
+  for (const sub of children.subSections) {
+    if (sub.sectionKey === parentSectionKey) {
+      logger.warn({ parentSectionKey, depth }, `listSectionChildren 把 ${parentSectionKey} 列为自己的子节点，跳过`);
+      continue;
+    }
+    const { sectionId } = await upsertSection({ siteKey, sectionKey: sub.sectionKey, name: sub.name, parentSectionId });
+    await sleep(requestIntervalMs);
+    await crawlSectionRecursive(page, adapter, siteKey, sectionId, sub.sectionKey, requestIntervalMs, depth + 1, visited);
+  }
+}
+
+/**
+ * Crawl boards (any depth of sub-sections) for `sections`. If `sections`
  * is omitted, all top-level sections in DB are processed.
  */
 export async function runInitBoards(
@@ -83,33 +122,12 @@ export async function runInitBoards(
   if (!adapter.listSectionChildren) throw new Error(`Adapter ${siteKey} has no listSectionChildren`);
   const cfg = loadSiteConfig(siteKey);
   const interval = cfg.crawl.structureRequestIntervalMs;
-
   const targets = opts.sections ?? (await listTopLevelSections(siteKey));
+  const visited = new Set<string>();
   for (const sec of targets) {
-    const children = await adapter.listSectionChildren(page, sec.sectionKey);
-    for (const b of children.boards) {
-      const { boardId } = await upsertBoard({
-        siteKey, boardKey: b.boardKey, name: b.name,
-        sectionId: sec.id, moderators: b.moderators,
-      });
-      await upsertDailyTraffic(boardId, b.stats);
-    }
-    for (const sub of children.subSections) {
-      const { sectionId } = await upsertSection({
-        siteKey, sectionKey: sub.sectionKey, name: sub.name, parentSectionId: sec.id,
-      });
-      await sleep(interval);
-      const nested = await adapter.listSectionChildren(page, sub.sectionKey);
-      for (const b of nested.boards) {
-        const { boardId } = await upsertBoard({
-          siteKey, boardKey: b.boardKey, name: b.name,
-          sectionId, moderators: b.moderators,
-        });
-        await upsertDailyTraffic(boardId, b.stats);
-      }
-    }
+    await crawlSectionRecursive(page, adapter, siteKey, sec.id, sec.sectionKey, interval, 1, visited);
     await sleep(interval);
-    logger.info({ siteKey, sectionKey: sec.sectionKey }, 'init: section children persisted');
+    logger.info({ siteKey, sectionKey: sec.sectionKey }, 'init: section subtree persisted');
   }
 }
 
