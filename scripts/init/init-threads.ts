@@ -21,7 +21,7 @@
  *   - boards already populated by scripts/init/init-boards.ts
  *   - .state/<siteKey>.json from scripts/auth/do-login.ts
  */
-import 'dotenv/config';
+import '../../src/config/load-env.js';
 import '../../src/adapters/index';
 import * as fs from 'fs';
 import * as path from 'path';
