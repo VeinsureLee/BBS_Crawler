@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AuthManager } from '../../../src/core/auth-manager';
+import { AuthManager } from '../../../src/session/auth-manager';
 import type { SiteAdapter } from '../../../src/contract/site-adapter';
 import { SessionExpiredError, MissingCredentialsError } from '../../../src/errors';
 
