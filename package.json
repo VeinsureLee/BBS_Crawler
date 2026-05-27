@@ -32,7 +32,8 @@
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
     "crawl:pinned": "tsx scripts/crawl/crawl-pinned.ts",
-    "crawl:board-skip": "tsx scripts/crawl/crawl-board-with-skip.ts"
+    "crawl:board-skip": "tsx scripts/crawl/crawl-board-with-skip.ts",
+    "crawl:thread": "tsx scripts/crawl/crawl-thread.ts"
   },
   "dependencies": {
     "@types/js-yaml": "^4.0.9",
