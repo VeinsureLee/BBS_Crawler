@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 import { loadAndResolvePaths, type PathOptions } from '../config/paths.js';
 
 export interface CrawlerConfig extends PathOptions {
+  /** Target site adapter key. Defaults to 'school-bbs'. */
   siteKey?: string | undefined;
 }
 
@@ -44,6 +45,8 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
   const readers = await import('../read/readers.js');
 
   const app = parseConfig(process.env);
+  // initDb is a process-level singleton: a second createCrawler() in the same
+  // process with a different dataDir is ignored (the first one wins).
   initDb({ dataDir: paths.dataDir });
 
   const browserPool = new BrowserPool({
@@ -77,6 +80,8 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
     },
     auth,
     registry: { getAdapter },
+    // The fetchThread path always persists with isPinned:false; pinned status
+    // is injected separately by runInitPinned.
     persistThread: async (sk, thread) => {
       const { threadId, boardDb } = await upsertThread(sk, thread, { isPinned: false });
       await upsertPosts(boardDb, threadId, thread.posts);
@@ -100,12 +105,7 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
   return {
     service,
     readers,
-    runInitSections: () => runInitSections(siteKey, async () => {
-      const acquired = await browserPool.acquire(siteKey);
-      const page = await acquired.context.newPage();
-      await auth.ensureLoggedIn(page, getAdapter(siteKey));
-      return page;
-    }),
+    runInitSections: () => runInitSections(siteKey, withLoggedInPage),
     runInitBoards: (opts) => withLoggedInPage((page) => runInitBoards(page, siteKey, opts ?? {})),
     runInitPinned: (boards) => withLoggedInPage((page) => runInitPinned(page, siteKey, boards)),
     runRefreshBoardStats: (opts) => withLoggedInPage((page) => runRefreshBoardStats(page, siteKey, opts)),

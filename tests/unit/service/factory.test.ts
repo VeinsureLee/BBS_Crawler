@@ -9,4 +9,10 @@ describe('createCrawler shape', () => {
     ];
     expect(keys.length).toBe(8);
   });
+
+  it('Crawler shape is exhaustive at compile time', () => {
+    type _Check = Exclude<keyof Crawler, 'service'|'readers'|'runInitSections'|'runInitBoards'|'runInitPinned'|'runRefreshBoardStats'|'withLoggedInPage'|'shutdown'> extends never ? true : never;
+    const ok: _Check = true;
+    expect(ok).toBe(true);
+  });
 });
