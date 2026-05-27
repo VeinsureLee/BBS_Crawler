@@ -35,48 +35,36 @@ function sleep(ms: number): Promise<void> {
  *
  * The config-driven path is preferred because it decouples init from the
  * forum's homepage layout; the homepage can change without breaking init.
+ * `getPage` is only called in the fallback path — if entries.yml is present
+ * and non-empty, no browser is opened.
  */
-export async function runInitSections(page: Page, siteKey: string): Promise<void> {
+export async function runInitSections(
+  siteKey: string,
+  getPage: () => Promise<Page>,
+): Promise<void> {
   const adapter = getAdapter(siteKey);
-
-  await upsertSite({
-    siteKey: adapter.siteKey,
-    displayName: adapter.displayName,
-    baseUrl: adapter.baseUrl,
-  });
-
+  await upsertSite({ siteKey: adapter.siteKey, displayName: adapter.displayName, baseUrl: adapter.baseUrl });
   validateConfigConsistency(siteKey);
   const entries = loadSiteEntries(siteKey);
-
   if (entries && entries.forums.length > 0) {
     for (const f of entries.forums) {
       await upsertSection({ siteKey, sectionKey: f.sectionKey, name: f.name });
     }
-    logger.info(
-      { siteKey, count: entries.forums.length, source: 'entries.yml' },
-      `init: 入库 ${entries.forums.length} 个顶级讨论区（来源：entries.yml）`,
-    );
+    logger.info({ siteKey, count: entries.forums.length, source: 'entries.yml' },
+      `init: 入库 ${entries.forums.length} 个顶级讨论区（来源：entries.yml）`);
     return;
   }
-
   if (!adapter.listSections) {
-    throw new Error(
-      `Adapter "${siteKey}" has no listSections and entries.yml is missing/empty`,
-    );
+    throw new Error(`Adapter "${siteKey}" has no listSections and entries.yml is missing/empty`);
   }
-
-  logger.warn(
-    { siteKey, source: 'adapter.listSections' },
-    'entries.yml 缺失或为空，回退到 adapter.listSections 爬首页',
-  );
+  logger.warn({ siteKey, source: 'adapter.listSections' }, 'entries.yml 缺失或为空，回退到 adapter.listSections 爬首页');
+  const page = await getPage();
   const sections = await adapter.listSections(page);
   for (const s of sections) {
     await upsertSection({ siteKey, sectionKey: s.sectionKey, name: s.name });
   }
-  logger.info(
-    { siteKey, count: sections.length, source: 'adapter' },
-    `init: 入库 ${sections.length} 个顶级讨论区（来源：adapter）`,
-  );
+  logger.info({ siteKey, count: sections.length, source: 'adapter' },
+    `init: 入库 ${sections.length} 个顶级讨论区（来源：adapter）`);
 }
 
 /**
