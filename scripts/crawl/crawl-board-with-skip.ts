@@ -18,7 +18,7 @@ import { loadSiteConfig } from '../../src/config/site-config';
 import { BrowserPool } from '../../src/session/browser-pool';
 import { createRateLimiter } from '../../src/session/rate-limiter';
 import { AuthManager } from '../../src/session/auth-manager';
-import { CrawlerService } from '../../src/core/crawler-service';
+import { CrawlerService } from '../../src/service/crawler-service';
 import { getAdapter } from '../../src/registry';
 import { upsertThread } from '../../src/repository/threads';
 import { upsertPosts } from '../../src/repository/posts';

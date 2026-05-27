@@ -25,7 +25,7 @@ export type {
 } from './contract/site-adapter.js';
 
 // Core services
-export { CrawlerService } from './core/crawler-service.js';
+export { CrawlerService } from './service/crawler-service.js';
 export type {
   CrawlerServiceDeps,
   FetchThreadInput,
@@ -33,17 +33,17 @@ export type {
   ListThreadsByNameInput,
   ListThreadsByNameOutput,
   FetchThreadByIdInput,
-} from './core/crawler-service.js';
+} from './service/crawler-service.js';
 export {
   runInitSections,
   runInitBoards,
   runInitPinned,
   runRefreshBoardStats,
-} from './core/init-runners.js';
+} from './service/init-runners.js';
 export type {
   RefreshBoardStatsOpts,
   RefreshBoardStatsResult,
-} from './core/init-runners.js';
+} from './service/init-runners.js';
 export { AuthManager } from './session/auth-manager.js';
 export { BrowserPool } from './session/browser-pool.js';
 export { createRateLimiter } from './session/rate-limiter.js';

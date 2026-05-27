@@ -21,7 +21,7 @@ import * as path from 'path';
 import { chromium } from 'playwright';
 import { parseConfig } from '../../src/config/app-config';
 import { initDb, closeAllDbs } from '../../src/repository/db';
-import { runRefreshBoardStats, type RefreshBoardStatsOpts } from '../../src/core/init-runners';
+import { runRefreshBoardStats, type RefreshBoardStatsOpts } from '../../src/service/init-runners';
 import { logger } from '../../src/util/logger';
 
 function parseArgs(argv: string[]): { siteKey: string; opts: RefreshBoardStatsOpts } {

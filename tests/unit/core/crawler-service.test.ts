@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { CrawlerService } from '../../../src/core/crawler-service';
+import { CrawlerService } from '../../../src/service/crawler-service';
 import type { SiteAdapter, Thread } from '../../../src/contract/site-adapter';
 import {
   SessionExpiredError,
