@@ -7,7 +7,6 @@ export interface CrawlerConfig extends PathOptions {
   /**
    * Override BrowserPool idle-close timeout (ms). 0 = never auto-close.
    * Default: read from env (IDLE_TIMEOUT_MS via parseConfig).
-   * MCP passes 0 so the browser lives for the entire process lifetime.
    */
   idleTimeoutMs?: number | undefined;
 }

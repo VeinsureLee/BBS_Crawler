@@ -34,7 +34,10 @@ describe('BrowserPool idle close', () => {
     });
     const acq = await pool.acquire('s');
     acq.release();
-    expect((pool as any).idleTimer).not.toBeNull();
-    clearTimeout((pool as any).idleTimer);
+    try {
+      expect((pool as any).idleTimer).not.toBeNull();
+    } finally {
+      if ((pool as any).idleTimer) clearTimeout((pool as any).idleTimer);
+    }
   });
 });
