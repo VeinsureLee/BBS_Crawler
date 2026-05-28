@@ -81,8 +81,7 @@ async function doLogin() {
     await ctx.storageState({ path: statePath });
     console.log(`Saved storage state to: ${statePath}`);
 
-    console.log('Done! You can close the browser now.');
-    await new Promise<void>((r) => process.on('SIGINT', () => r()));
+    console.log('Done! Login state saved. Closing browser.');
 
   } finally {
     await browser.close();
