@@ -4,6 +4,11 @@ import { loadAndResolvePaths, type PathOptions } from '../config/paths.js';
 export interface CrawlerConfig extends PathOptions {
   /** Target site adapter key. Defaults to 'school-bbs'. */
   siteKey?: string | undefined;
+  /**
+   * Override BrowserPool idle-close timeout (ms). 0 = never auto-close.
+   * Default: read from env (IDLE_TIMEOUT_MS via parseConfig).
+   */
+  idleTimeoutMs?: number | undefined;
 }
 
 export interface Crawler {
@@ -54,7 +59,7 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
     executablePath: app.browserExecutablePath,
     userAgent: app.browserUserAgent,
     storageStateDir: app.storageStateDir,
-    idleTimeoutMs: app.idleTimeoutMs,
+    idleTimeoutMs: config.idleTimeoutMs ?? app.idleTimeoutMs,
   });
 
   const auth = new AuthManager({
