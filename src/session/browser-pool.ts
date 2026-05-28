@@ -88,6 +88,12 @@ export class BrowserPool {
 
   private scheduleIdleClose(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.opts.idleTimeoutMs <= 0) {
+      // 0 (or negative) = disabled. MCP uses this so the browser persists
+      // for the lifetime of the Claude session.
+      this.idleTimer = null;
+      return;
+    }
     this.idleTimer = setTimeout(() => { this.close().catch(() => {}); }, this.opts.idleTimeoutMs);
     this.idleTimer.unref?.();
   }
