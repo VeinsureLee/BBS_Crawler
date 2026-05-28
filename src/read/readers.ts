@@ -127,6 +127,41 @@ export async function getThreadByUrl(siteKey: string, url: string): Promise<{ th
   return null;
 }
 
+/**
+ * Cross-board title LIKE search over stored threads.
+ * Reads each board db via `findBoardDbPath` + `getBoardDb`, merges, sorts by
+ * posted_at DESC, truncates to `limit`.
+ *
+ * Used by mcp's `forum_search_local` tool. Pure local — no web fetch.
+ */
+export async function searchThreadsByTitle(
+  siteKey: string,
+  keyword: string,
+  limit = 50,
+): Promise<ThreadRow[]> {
+  const boards = await listBoards(siteKey);
+  const pattern = `%${keyword}%`;
+  const collected: ThreadRow[] = [];
+  for (const b of boards) {
+    if (!b.dbPath) continue;
+    const db = getBoardDb(b.dbPath);
+    const r = await db.query<{
+      id: number; url: string; title: string; author: string | null;
+      posted_at: string | null; last_reply_at: string | null;
+      reply_count: number | null; view_count: number | null; is_pinned: number;
+    }>(
+      `SELECT id, url, title, author, posted_at, last_reply_at, reply_count, view_count, is_pinned
+         FROM threads WHERE title LIKE $1
+        ORDER BY posted_at DESC
+        LIMIT $2`,
+      [pattern, limit],
+    );
+    collected.push(...r.rows.map(toThreadRow));
+  }
+  collected.sort((a, b) => (b.postedAt ?? '').localeCompare(a.postedAt ?? ''));
+  return collected.slice(0, limit);
+}
+
 export { findBoardByName, getBoardById } from '../repository/boards-lookup.js';
 
 export interface SectionDetailBoard {
