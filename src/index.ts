@@ -23,7 +23,8 @@ export type { RefreshBoardStatsOpts, RefreshBoardStatsResult } from './service/i
 // ③ 读 / 查询 API
 export {
   listSites, listSections, listBoards, getSectionDetail,
-  listThreadsByBoard, getThreadByUrl, findBoardByName, getBoardById,
+  listThreadsByBoard, getThreadByUrl, searchThreadsByTitle,
+  findBoardByName, getBoardById,
 } from './read/readers.js';
 export type {
   SiteInfo, SectionInfo, BoardInfo, ThreadRow, PostRow,
