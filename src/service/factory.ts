@@ -1,5 +1,8 @@
 import type { Page } from 'playwright';
 import { loadAndResolvePaths, type PathOptions } from '../config/paths.js';
+import type { SiteAdapter } from '../contract/site-adapter.js';
+import { checkAuthStatus, warmUp as warmUpSession } from './session-ops.js';
+import type { AuthStatus, WarmUpResult } from './session-ops.js';
 
 export interface CrawlerConfig extends PathOptions {
   /** Target site adapter key. Defaults to 'school-bbs'. */
@@ -19,6 +22,10 @@ export interface Crawler {
   runInitPinned: (boards: import('../repository/boards.js').BoardRow[]) => Promise<void>;
   runRefreshBoardStats: (opts: import('./init-runners.js').RefreshBoardStatsOpts) => Promise<import('./init-runners.js').RefreshBoardStatsResult>;
   withLoggedInPage: <T>(fn: (page: Page) => Promise<T>) => Promise<T>;
+  /** Read-only login-state probe — navigates to baseUrl, never logs in. */
+  authStatus: () => Promise<AuthStatus>;
+  /** Launch browser + establish session, fetching no data. */
+  warmUp: () => Promise<WarmUpResult>;
   shutdown: () => Promise<void>;
 }
 
@@ -35,7 +42,7 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
   // Side-effect import registers built-in adapters into the registry.
   await import('../adapters/index.js');
 
-  const { parseConfig } = await import('../config/app-config.js');
+  const { parseConfig, credentialEnvKeys } = await import('../config/app-config.js');
   const { initDb, closeAllDbs } = await import('../repository/db.js');
   const { BrowserPool } = await import('../session/browser-pool.js');
   const { AuthManager } = await import('../session/auth-manager.js');
@@ -95,6 +102,15 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
     appendFetchLog,
   });
 
+  const sessionOpsDeps = {
+    browserPool: { acquire: (sk: string) => browserPool.acquire(sk) },
+    getAdapter,
+    ensureLoggedIn: (page: Page, adapter: SiteAdapter) => auth.ensureLoggedIn(page, adapter),
+    // adapter.isLoggedIn checks the CURRENT page, so authStatus must navigate to
+    // the site home first. baseUrl env key is site-specific (e.g. SCHOOL_BBS_BASE_URL).
+    baseUrl: process.env[credentialEnvKeys(siteKey).baseUrl] ?? '',
+  };
+
   async function withLoggedInPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
     const acquired = await browserPool.acquire(siteKey);
     const page = await acquired.context.newPage();
@@ -115,6 +131,8 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
     runInitPinned: (boards) => withLoggedInPage((page) => runInitPinned(page, siteKey, boards)),
     runRefreshBoardStats: (opts) => withLoggedInPage((page) => runRefreshBoardStats(page, siteKey, opts)),
     withLoggedInPage,
+    authStatus: () => checkAuthStatus(sessionOpsDeps, siteKey),
+    warmUp: () => warmUpSession(sessionOpsDeps, siteKey),
     async shutdown() {
       await browserPool.close();
       await closeAllDbs();
