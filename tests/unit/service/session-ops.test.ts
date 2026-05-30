@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { checkAuthStatus, type SessionOpsDeps } from '../../../src/service/session-ops.js';
+import { checkAuthStatus, warmUp, type SessionOpsDeps } from '../../../src/service/session-ops.js';
 import type { SiteAdapter } from '../../../src/contract/site-adapter.js';
 
 function makeFakeAdapter(loggedIn: boolean): SiteAdapter {
@@ -49,6 +49,36 @@ describe('checkAuthStatus', () => {
     (adapter.isLoggedIn as any).mockRejectedValueOnce(new Error('boom'));
     const { deps, page, release } = makeDeps(adapter);
     await expect(checkAuthStatus(deps, 'school-bbs')).rejects.toThrow('boom');
+    expect(page.close).toHaveBeenCalled();
+    expect(release).toHaveBeenCalled();
+  });
+});
+
+describe('warmUp', () => {
+  it('calls ensureLoggedIn then reports loggedIn=true', async () => {
+    const adapter = makeFakeAdapter(true);
+    const ensureLoggedIn = vi.fn().mockResolvedValue(undefined);
+    const { deps, page, release } = makeDeps(adapter, { ensureLoggedIn });
+    const r = await warmUp(deps, 'school-bbs');
+    expect(ensureLoggedIn).toHaveBeenCalledTimes(1);
+    expect(r).toEqual({ siteKey: 'school-bbs', loggedIn: true, warmedAt: '2026-05-30T00:00:00.000Z' });
+    expect(page.close).toHaveBeenCalled();
+    expect(release).toHaveBeenCalled();
+  });
+
+  it('does NOT fetch any data (no listThreads/getThread)', async () => {
+    const adapter = makeFakeAdapter(true);
+    const { deps } = makeDeps(adapter, { ensureLoggedIn: vi.fn().mockResolvedValue(undefined) });
+    await warmUp(deps, 'school-bbs');
+    expect(adapter.listThreads).not.toHaveBeenCalled();
+    expect(adapter.getThread).not.toHaveBeenCalled();
+  });
+
+  it('propagates login failure and still releases', async () => {
+    const adapter = makeFakeAdapter(false);
+    const ensureLoggedIn = vi.fn().mockRejectedValue(new Error('login boom'));
+    const { deps, page, release } = makeDeps(adapter, { ensureLoggedIn });
+    await expect(warmUp(deps, 'school-bbs')).rejects.toThrow('login boom');
     expect(page.close).toHaveBeenCalled();
     expect(release).toHaveBeenCalled();
   });

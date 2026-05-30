@@ -52,3 +52,23 @@ export async function checkAuthStatus(deps: SessionOpsDeps, siteKey: string): Pr
     acquired.release();
   }
 }
+
+/**
+ * Launch browser + establish/verify a logged-in session, fetching NO data.
+ * Used at server startup to make the first real request fast. Throws if login
+ * cannot be established (propagates the adapter/auth error).
+ */
+export async function warmUp(deps: SessionOpsDeps, siteKey: string): Promise<WarmUpResult> {
+  const now = deps.now ?? (() => new Date().toISOString());
+  const adapter = deps.getAdapter(siteKey);
+  const acquired = await deps.browserPool.acquire(siteKey);
+  const page = await acquired.context.newPage();
+  try {
+    await deps.ensureLoggedIn(page, adapter);
+    const loggedIn = await adapter.isLoggedIn(page);
+    return { siteKey, loggedIn, warmedAt: now() };
+  } finally {
+    await page.close().catch(() => {});
+    acquired.release();
+  }
+}
