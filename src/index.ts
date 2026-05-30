@@ -6,6 +6,9 @@
 // ① 装配
 export { createCrawler } from './service/factory.js';
 export type { Crawler, CrawlerConfig } from './service/factory.js';
+export { CrawlerRuntime } from './service/runtime.js';
+export type { CrawlerRuntimeOptions } from './service/runtime.js';
+export type { AuthStatus, WarmUpResult } from './service/session-ops.js';
 
 // ② 抓取用例
 export { CrawlerService } from './service/crawler-service.js';
@@ -71,6 +74,8 @@ export {
 } from './errors.js';
 export { logger, addRedactedSecret, appLogPath } from './util/logger.js';
 export { retry } from './util/retry.js';
+export { classifyError } from './error-classify.js';
+export type { ErrorKind, ErrorClassification } from './error-classify.js';
 export type {
   SiteAdapter, LoginCredentials, ListParams, GetThreadParams,
   ThreadSummary, Thread, Post, PostAttachment,
