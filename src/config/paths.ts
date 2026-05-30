@@ -7,7 +7,12 @@ export interface PathOptions {
   envFile?: string | undefined;
   dataDir?: string | undefined;
   siteConfigDir?: string | undefined;
-  cwd?: string | undefined; // test seam
+  /**
+   * Test seam: override the base directory used to locate the package-local
+   * `.env` and the default data dir. Production leaves this unset and uses the
+   * crawler package root.
+   */
+  cwd?: string | undefined;
 }
 
 export interface ResolvedPaths {
@@ -16,28 +21,33 @@ export interface ResolvedPaths {
   siteConfigDir: string;
 }
 
-/** Walk up from `start` looking for a `.env`. Returns its absolute path or null. */
-export function findEnvFileUpward(start: string): string | null {
-  let dir = path.resolve(start);
-  for (;;) {
-    const candidate = path.join(dir, '.env');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-/** crawler package's bundled config/sites dir, resolved relative to this module. */
-export function bundledSiteConfigDir(): string {
+/**
+ * The crawler package root (the BBS_Crawler directory), resolved relative to
+ * this module. Works in both dev (src/config/paths.ts) and built
+ * (dist/config/paths.js): both live two levels below the package root.
+ */
+export function packageRootDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, '..', '..', 'config', 'sites');
+  return path.resolve(here, '..', '..');
 }
 
+/** crawler package's bundled config/sites dir. */
+export function bundledSiteConfigDir(): string {
+  return path.join(packageRootDir(), 'config', 'sites');
+}
+
+/**
+ * Resolve which `.env` to load. The crawler only ever uses its OWN
+ * package-local `.env` — it does NOT search parent directories. Precedence:
+ *   explicit `opts.envFile` > `BBS_ENV_FILE` env > `<packageRoot>/.env`.
+ * Returns null if no such file exists.
+ */
 export function resolveEnvFile(opts: PathOptions): string | null {
   if (opts.envFile) return opts.envFile;
   if (process.env.BBS_ENV_FILE) return process.env.BBS_ENV_FILE;
-  return findEnvFileUpward(opts.cwd ?? process.cwd());
+  const base = opts.cwd ?? packageRootDir();
+  const candidate = path.join(base, '.env');
+  return fs.existsSync(candidate) ? candidate : null;
 }
 
 export function resolveSiteConfigDir(opts: PathOptions): string {
@@ -50,19 +60,20 @@ export function resolveSiteConfigDir(opts: PathOptions): string {
  * Resolve the data directory. The env var read here (and written by
  * `loadAndResolvePaths`) is `DATABASE_PATH` — the same name `parseConfig`
  * consumes; `dataDir` is just our alias for it. Precedence: explicit
- * `opts.dataDir` > `DATABASE_PATH` env > `<dir of .env>/data`.
+ * `opts.dataDir` > `DATABASE_PATH` env > `<dir of .env>/data` (falling back to
+ * `<packageRoot>/data` when no `.env` was found).
  */
 export function resolveDataDir(opts: PathOptions, envFile: string | null): string {
   if (opts.dataDir) return opts.dataDir;
   if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH;
-  const base = envFile ? path.dirname(envFile) : (opts.cwd ?? process.cwd());
+  const base = envFile ? path.dirname(envFile) : (opts.cwd ?? packageRootDir());
   return path.join(base, 'data');
 }
 
 /**
- * Load `.env` (dotenv does NOT override already-set process.env) then resolve
- * all paths and export them back to process.env so existing consumers
- * (site-config, parseConfig) pick them up.
+ * Load the package-local `.env` (dotenv does NOT override already-set
+ * process.env) then resolve all paths and export them back to process.env so
+ * existing consumers (site-config, parseConfig) pick them up.
  */
 export function loadAndResolvePaths(opts: PathOptions = {}): ResolvedPaths {
   const envFile = resolveEnvFile(opts);

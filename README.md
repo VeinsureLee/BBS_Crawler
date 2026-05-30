@@ -50,7 +50,7 @@ npm run init:threads -- --with-plain
 
 路径解析优先级：**显式参数 > 环境变量 > 自动发现**。
 
-- `.env`：`BBS_ENV_FILE` 显式指定，否则从 cwd 向上查找（将 `.env` 放在 BBS_MCP 根目录即可被子目录自动命中）。
+- `.env`：`BBS_ENV_FILE` 显式指定，否则只读包内 `BBS_Crawler/.env`（**不再向上查找父目录**；嵌入方负责把配置写入该文件）。
 - `config/sites`：`SITE_CONFIG_DIR` 显式指定，否则使用包自带目录。
 - 数据目录：`DATABASE_PATH` 显式指定，否则默认为 `.env` 所在目录下的 `data/`。
 
@@ -99,7 +99,7 @@ await crawler.shutdown();
 | **② 抓取用例** | `CrawlerService`（方法：`fetchThread` / `fetchThreadById` / `listThreadsByName`）；`runInitSections` / `runInitBoards` / `runInitPinned` / `runRefreshBoardStats` |
 | **③ 读 / 查询 API** | `listSites` / `listSections` / `listBoards` / `getSectionDetail` / `listThreadsByBoard` / `getThreadByUrl` / `findBoardByName` / `getBoardById` |
 | **④ 持久化（进阶）** | `initDb` / `getStructureDb` / `getBoardDb` / `getDataDir` / `closeAllDbs`；`upsertSite` / `upsertSection` / `upsertBoard` / `upsertThread` / `upsertPosts` / `upsertDailyTraffic` / `appendFetchLog` 等 |
-| **⑤ 基础设施** | `BrowserPool` / `AuthManager` / `createRateLimiter` / `getAdapter` / `listAdapters` / `parseConfig` / `loadAndResolvePaths` / `findEnvFileUpward` |
+| **⑤ 基础设施** | `BrowserPool` / `AuthManager` / `createRateLimiter` / `getAdapter` / `listAdapters` / `parseConfig` / `loadAndResolvePaths` |
 | **⑥ 导出 / 错误 / 类型** | `exportForumStructure` / `loadForumStructure`；10 个错误类（`BaseAppError` 等）；`logger` / `retry`；`SiteAdapter` 等契约类型 |
 
 ## 目录结构

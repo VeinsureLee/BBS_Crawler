@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  findEnvFileUpward,
+  packageRootDir,
   resolveDataDir,
   resolveEnvFile,
   resolveSiteConfigDir,
@@ -28,17 +28,12 @@ afterEach(() => {
   }
 });
 
-describe('findEnvFileUpward', () => {
-  it('finds .env in an ancestor directory', () => {
-    const root = mkTmp();
-    const nested = path.join(root, 'a', 'b');
-    fs.mkdirSync(nested, { recursive: true });
-    fs.writeFileSync(path.join(root, '.env'), 'X=1');
-    expect(findEnvFileUpward(nested)).toBe(path.join(root, '.env'));
+describe('packageRootDir', () => {
+  it('resolves to the BBS_Crawler package root', () => {
+    expect(path.basename(packageRootDir())).toBe('BBS_Crawler');
   });
-  it('returns null when no .env exists up to fs root', () => {
-    const root = mkTmp();
-    expect(findEnvFileUpward(root)).toBeNull();
+  it('bundledSiteConfigDir sits under the package root', () => {
+    expect(bundledSiteConfigDir()).toBe(path.join(packageRootDir(), 'config', 'sites'));
   });
 });
 
@@ -51,18 +46,25 @@ describe('resolveEnvFile', () => {
     process.env.BBS_ENV_FILE = '/from/env/.env';
     expect(resolveEnvFile({})).toBe('/from/env/.env');
   });
-  it('searches upward from opts.cwd when neither opts.envFile nor BBS_ENV_FILE set', () => {
+  it('uses the package-local .env (base overridable via cwd seam) when present', () => {
+    delete process.env.BBS_ENV_FILE;
+    const root = mkTmp();
+    fs.writeFileSync(path.join(root, '.env'), 'X=1');
+    expect(resolveEnvFile({ cwd: root })).toBe(path.join(root, '.env'));
+  });
+  it('returns null when the package-local .env does not exist', () => {
+    delete process.env.BBS_ENV_FILE;
+    const root = mkTmp();
+    expect(resolveEnvFile({ cwd: root })).toBeNull();
+  });
+  it('does NOT search parent directories', () => {
     delete process.env.BBS_ENV_FILE;
     const root = mkTmp();
     const nested = path.join(root, 'a', 'b');
     fs.mkdirSync(nested, { recursive: true });
-    fs.writeFileSync(path.join(root, '.env'), 'X=1');
-    expect(resolveEnvFile({ cwd: nested })).toBe(path.join(root, '.env'));
-  });
-  it('returns null when nothing is found searching upward', () => {
-    delete process.env.BBS_ENV_FILE;
-    const root = mkTmp();
-    expect(resolveEnvFile({ cwd: root })).toBeNull();
+    fs.writeFileSync(path.join(root, '.env'), 'X=1'); // only the ancestor has .env
+    // base = nested, which has no .env of its own → must NOT find the ancestor's
+    expect(resolveEnvFile({ cwd: nested })).toBeNull();
   });
 });
 
@@ -77,6 +79,14 @@ describe('resolveDataDir', () => {
   it('falls back to <dir of .env>/data', () => {
     delete process.env.DATABASE_PATH;
     expect(resolveDataDir({}, path.join('/repo', '.env'))).toBe(path.join('/repo', 'data'));
+  });
+  it('falls back to <packageRoot>/data when no .env was found', () => {
+    delete process.env.DATABASE_PATH;
+    expect(resolveDataDir({}, null)).toBe(path.join(packageRootDir(), 'data'));
+  });
+  it('uses opts.cwd as the base when no .env and cwd is given', () => {
+    delete process.env.DATABASE_PATH;
+    expect(resolveDataDir({ cwd: '/base' }, null)).toBe(path.join('/base', 'data'));
   });
 });
 
@@ -102,7 +112,6 @@ describe('loadAndResolvePaths', () => {
     process.env.SOMEKEY = 'preset';
     fs.writeFileSync(path.join(dir, '.env'), 'SOMEKEY=from-dotenv');
     loadAndResolvePaths({ cwd: dir, siteConfigDir: '/cfg' });
-    // dotenv must not override an env var that already had a value.
     expect(process.env.SOMEKEY).toBe('preset');
   });
 

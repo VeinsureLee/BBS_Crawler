@@ -61,7 +61,7 @@ export { AuthManager } from './session/auth-manager.js';
 export { createRateLimiter } from './session/rate-limiter.js';
 export { getAdapter, listAdapters } from './registry.js';
 export { parseConfig } from './config/app-config.js';
-export { loadAndResolvePaths, findEnvFileUpward, bundledSiteConfigDir } from './config/paths.js';
+export { loadAndResolvePaths, bundledSiteConfigDir } from './config/paths.js';
 export type { PathOptions, ResolvedPaths } from './config/paths.js';
 
 // ⑥ 导出/导入 + 错误 + 类型
