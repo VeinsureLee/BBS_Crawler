@@ -28,6 +28,7 @@
     "refresh:stats": "tsx scripts/init/refresh-board-stats.ts",
 
     "db:check": "tsx scripts/db/check-db.ts",
+    "repl": "tsx scripts/repl/consumable-api.ts",
 
     "crawl:board": "tsx scripts/crawl/crawl-board.ts",
     "crawl:section": "tsx scripts/crawl/crawl-section.ts",
