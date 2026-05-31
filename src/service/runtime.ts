@@ -47,6 +47,17 @@ export class CrawlerRuntime {
   authStatus(): Promise<AuthStatus> { return this.ready().authStatus(); }
   warmUp(): Promise<WarmUpResult> { return this.ready().warmUp(); }
 
+  runInitSections(): Promise<void> { return this.ready().runInitSections(); }
+  runInitBoards(opts?: Parameters<Crawler['runInitBoards']>[0]): Promise<void> {
+    return this.ready().runInitBoards(opts);
+  }
+  runInitPinned(boards: Parameters<Crawler['runInitPinned']>[0]): Promise<void> {
+    return this.ready().runInitPinned(boards);
+  }
+  runRefreshBoardStats(opts: Parameters<Crawler['runRefreshBoardStats']>[0]): ReturnType<Crawler['runRefreshBoardStats']> {
+    return this.ready().runRefreshBoardStats(opts);
+  }
+
   /** Release browser + db. Idempotent — safe to call when never/already shut down. */
   async shutdown(): Promise<void> {
     if (!this.crawler) return;
