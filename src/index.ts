@@ -78,7 +78,8 @@ export {
   NavigationTimeoutError, RateLimitedError, SelectorMissingError, UnknownSiteError,
   DatabaseError, BoardNotFoundError, FetchFailedError,
 } from './errors.js';
-export { logger, addRedactedSecret, appLogPath } from './util/logger.js';
+export { logger, addRedactedSecret, appLogPath, addLogShadow } from './util/logger.js';
+export type { LogShadowEntry, LogShadowLevel } from './util/logger.js';
 export { retry } from './util/retry.js';
 export { classifyError } from './error-classify.js';
 export type { ErrorKind, ErrorClassification } from './error-classify.js';

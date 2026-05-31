@@ -1,6 +1,69 @@
 import pino, { type Logger, type StreamEntry } from 'pino';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Writable } from 'node:stream';
+
+// ----------------------------------------------------------------------------
+// Log shadow API
+// ----------------------------------------------------------------------------
+// Consumers (e.g. MCP) can register a shadow function to receive every log
+// entry as a parsed object. Used by MCP to route logs to date/category files.
+// The shadow is invoked AFTER pino has serialized the line, so the payload
+// reflects post-redaction values.
+
+export type LogShadowLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+
+export interface LogShadowEntry {
+  /** Pino-style epoch-ms timestamp. */
+  time: number;
+  level: LogShadowLevel;
+  /** Optional category tag (e.g. 'init.pinned'); when the call site passes
+   *  `{ category: '...' }` as part of the payload object. */
+  category?: string;
+  msg: string;
+  /** All other fields the call site attached. */
+  [key: string]: unknown;
+}
+
+const shadows: Array<(entry: LogShadowEntry) => void> = [];
+
+const PINO_LEVEL_TO_NAME: Record<number, LogShadowLevel> = {
+  10: 'trace', 20: 'debug', 30: 'info', 40: 'warn', 50: 'error', 60: 'fatal',
+};
+
+export function addLogShadow(fn: (entry: LogShadowEntry) => void): () => void {
+  shadows.push(fn);
+  return () => {
+    const idx = shadows.indexOf(fn);
+    if (idx >= 0) shadows.splice(idx, 1);
+  };
+}
+
+const shadowStream = new Writable({
+  write(chunk, _encoding, callback) {
+    if (shadows.length > 0) {
+      try {
+        const raw = JSON.parse(chunk.toString()) as Record<string, unknown>;
+        const levelNum = typeof raw.level === 'number' ? raw.level : 30;
+        const entry: LogShadowEntry = {
+          time: typeof raw.time === 'number' ? raw.time : Date.now(),
+          level: PINO_LEVEL_TO_NAME[levelNum] ?? 'info',
+          msg: typeof raw.msg === 'string' ? raw.msg : '',
+          ...raw,
+        };
+        // Re-set level/time on the spread copy since the spread might have brought
+        // in the numeric level / different shape.
+        entry.level = PINO_LEVEL_TO_NAME[levelNum] ?? 'info';
+        for (const s of shadows) {
+          try { s(entry); } catch {}
+        }
+      } catch {
+        // chunk wasn't valid JSON — skip
+      }
+    }
+    callback();
+  },
+});
 
 const secrets = new Set<string>();
 
@@ -55,14 +118,16 @@ const conditionalStdout = {
 };
 
 function buildStreams(): StreamEntry[] {
-  const streams: StreamEntry[] = [{ stream: conditionalStdout as unknown as NodeJS.WritableStream }];
+  const streams: StreamEntry[] = [
+    { stream: conditionalStdout as unknown as NodeJS.WritableStream },
+    // Shadow stream: zero-cost when no shadow registered; receives every log
+    // line so consumers (MCP log router) can split by category.
+    { stream: shadowStream },
+  ];
   if (fileLoggingDisabled()) return streams;
 
   const filePath = appLogPath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  // sync: true avoids "sonic boom is not ready yet" errors when the process
-  // exits very quickly (e.g., CLI scripts with arg-validation early-exit).
-  // Performance cost per log line is negligible for our scale.
   streams.push({ stream: pino.destination({ dest: filePath, sync: true }) });
   return streams;
 }
