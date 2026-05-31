@@ -1,141 +1,189 @@
 # bbs-crawler
 
-Playwright + 分层 SQLite 的 BBS 爬虫库，作为 BBS_MCP 的可嵌入组件。
+Playwright + layered-SQLite BBS crawler. Embeddable component of
+`bbs-mcp`; also runnable standalone via `npm run init:*` / `crawl:*`
+CLI scripts.
 
-## 环境要求
+## Requirements
 
-- **Node.js ≥ 20**（推荐 LTS 20 / 22；24 亦支持）。
-- 原生依赖 `better-sqlite3`（`^12`）随包提供预编译二进制，覆盖 Node 20 / 22 / 24（win/mac/linux、x64/arm64），`npm install` 通常直接下载、**无需本机编译**。
-- 若所在平台 / Node 版本没有现成预编译包，`npm install` 会回退到源码编译，此时需要本机具备 **Python 3** + **C/C++ 构建工具链**（Windows：安装 Visual Studio Build Tools 并勾选 *Desktop development with C++*）。装好后重装或 `npm rebuild better-sqlite3` 即可。
-- 备注：旧版（better-sqlite3 11.x）没有 Node 24 的预编译包，在 Node 24 上 fresh clone 必须本机编译——升到 12.x 后此问题消失。
+- **Node.js ≥ 20** (LTS 20 / 22 recommended; 24 supported).
+- Native dep `better-sqlite3` (`^12`) ships prebuilt binaries for
+  Node 20/22/24 × win/mac/linux × x64/arm64 — `npm install` normally
+  downloads them with no local compile.
+- If your platform/Node combo has no prebuilt, npm falls back to source
+  build, which needs **Python 3** + a C/C++ toolchain (Windows: Visual
+  Studio Build Tools with "Desktop development with C++"). Re-install
+  or `npm rebuild better-sqlite3` after the toolchain is in place.
 
-## 功能总览
+## What it does
 
-| 能力 | 入口命令 |
+| Capability | CLI command |
 |---|---|
-| 登录并保存浏览器会话 | `npm run login` |
-| 非交互式登录（仅读环境变量） | `npm run login:once` |
-| 初始化讨论区（顶层 sections） | `npm run init:sections` |
-| 初始化版面（boards + 子版面） | `npm run init:boards` |
-| 初始化置顶帖（默认）；`--with-plain` 额外抓首页普通帖 | `npm run init:threads` |
-| 一键顺序执行以上三步 | `npm run init` |
-| 导出论坛结构到 JSON | `npm run init:export` |
-| 刷新版面流量统计 | `npm run refresh:stats` |
-| 按 id 爬单帖 | `npm run crawl:thread -- --id <boardKey>/<articleId>` |
-| 按 URL 爬单帖 | `npm run crawl:thread -- --url <url>` |
-| 按讨论区查询详情（程序内） | read API `getSectionDetail()` |
-| 数据库健康检查 | `npm run db:check` |
+| Login + save browser session | `npm run login` |
+| Non-interactive login (env-driven) | `npm run login:once` |
+| Init top-level forum sections | `npm run init:sections` |
+| Init boards + sub-sections | `npm run init:boards` |
+| Init pinned threads (default); `--with-plain` also fetches first-page plain threads | `npm run init:threads` |
+| All three in order | `npm run init` |
+| Export forum structure to JSON | `npm run init:export` |
+| Refresh per-board traffic stats | `npm run refresh:stats` |
+| Crawl one thread by id | `npm run crawl:thread -- --id <boardKey>/<articleId>` |
+| Crawl one thread by url | `npm run crawl:thread -- --url <url>` |
+| DB health check | `npm run db:check` |
 
-## 快速开始
+## Quick start
 
 ```bash
-# 1. 安装依赖
+# 1. Install
 npm install
 npx playwright install chromium
 
-# 2. 配置环境
+# 2. Configure
 cp .env.example .env
-# 填写 SCHOOL_BBS_USERNAME / SCHOOL_BBS_PASSWORD / SCHOOL_BBS_BASE_URL
+# fill SCHOOL_BBS_USERNAME / SCHOOL_BBS_PASSWORD / SCHOOL_BBS_BASE_URL
 
-# 3. 登录（将会话保存至 STORAGE_STATE_DIR，默认 .state/）
+# 3. Login (saves session to STORAGE_STATE_DIR, default .state/)
 npm run login
 
-# 4. 初始化论坛结构
+# 4. Bootstrap forum structure
 npm run init
-# 如需同时抓取首页普通帖：
+# To also pull first-page plain threads:
 npm run init:threads -- --with-plain
 ```
 
-## 配置（可嵌入）
+## Embedding
 
-路径解析优先级：**显式参数 > 环境变量 > 自动发现**。
+Path resolution precedence: **explicit arg > env var > auto-discover**.
 
-- `.env`：`BBS_ENV_FILE` 显式指定，否则只读包内 `BBS_Crawler/.env`（**不再向上查找父目录**；嵌入方负责把配置写入该文件）。
-- `config/sites`：`SITE_CONFIG_DIR` 显式指定，否则使用包自带目录。
-- 数据目录：`DATABASE_PATH` 显式指定，否则默认为 `.env` 所在目录下的 `data/`。
+- `.env` — set `BBS_ENV_FILE` to override; otherwise reads only the
+  in-package `BBS_Crawler/.env` (does NOT walk parent dirs; the
+  embedder is responsible for writing this file).
+- `config/sites` — `SITE_CONFIG_DIR` overrides; otherwise bundled.
+- Data dir — `DATABASE_PATH` overrides; otherwise `<.env dir>/data`.
 
-程序内通过 `createCrawler()` 一次性装配，返回完整的 `Crawler` 对象：
+`createCrawler()` is the single entry:
 
-```typescript
+```ts
 import { createCrawler } from 'bbs-crawler';
 
 const crawler = await createCrawler({
-  envFile?: string,      // .env 文件路径
-  dataDir?: string,      // 数据目录
-  siteConfigDir?: string,// site YAML 目录
-  siteKey?: string,      // 默认 'school-bbs'
+  envFile?: string,
+  dataDir?: string,
+  siteConfigDir?: string,
+  siteKey?: string,         // default 'school-bbs'
+  idleTimeoutMs?: number,   // 0 = never auto-close browser
 });
 
-// crawler.service          — CrawlerService（抓取）
-// crawler.readers          — 读 / 查询 API
-// crawler.runInitSections  — 初始化讨论区
-// crawler.runInitBoards    — 初始化版面
-// crawler.runInitPinned    — 初始化置顶帖
-// crawler.runRefreshBoardStats — 刷新流量统计
-// crawler.withLoggedInPage — 直接操作已登录的 Page
-// crawler.shutdown         — 释放浏览器与数据库连接
+// crawler.service          — CrawlerService (fetch / list / etc.)
+// crawler.readers          — read/query API
+// crawler.runInitSections  — bootstrap sections
+// crawler.runInitBoards    — parallel BFS over the section tree (v4+)
+// crawler.runInitPinned    — parallel pool + retry passes (v4+)
+// crawler.runRefreshBoardStats — parallel refresh per section
+// crawler.withLoggedInPage — drive an already-logged-in Page
+// crawler.authStatus       — read-only login probe (no side-effect login)
+// crawler.warmUp           — establish session, fetching no data
+// crawler.shutdown         — release browser + db
 
 await crawler.shutdown();
 ```
 
-关键环境变量（完整列表见 `.env.example`）：
+`CrawlerRuntime` adds an idempotent lifecycle wrapper around `Crawler` —
+preferred for long-lived embedders that need init/shutdown ordering
+guarantees.
 
-| 变量 | 说明 |
+### Parallel init (v4)
+
+`runInitBoards`, `runInitPinned`, and `runRefreshBoardStats` all accept:
+
+```ts
+interface InitOpts {
+  concurrency?: number;        // worker pool size; defaults to YAML crawl.concurrency
+  retryConcurrency?: number;   // applies to runInitPinned; default 1
+  maxRetryPasses?: number;     // applies to runInitPinned; default YAML maxRetryPasses
+  onProgress?: (e: InitProgressEvent) => void;
+}
+```
+
+`onProgress` fires once per item per `started` / `ok` / `failed`
+transition. Consumers (e.g. bbs-mcp's `forum_init`) translate these
+into UI progress events.
+
+### Logging
+
+Pino, multi-stream:
+- stdout (suppressed when `LOG_STDOUT_DISABLED=true` — used by CLI TUIs)
+- `<LOG_DIR>/app/app-<YYYY-MM-DD>.log` (skipped under `NODE_ENV=test`)
+- Shadow stream — `addLogShadow(fn)` registers a callback that receives
+  every parsed log entry. Used by bbs-mcp to route by `category` field
+  into its own dated, categorized log tree.
+
+### Key env vars
+
+| Var | Meaning |
 |---|---|
-| `SCHOOL_BBS_USERNAME` / `SCHOOL_BBS_PASSWORD` / `SCHOOL_BBS_BASE_URL` | 站点凭据 |
-| `DATABASE_PATH` | SQLite 数据目录（默认 `.env` 同级 `data/`） |
-| `BROWSER_HEADLESS` | `false` 可打开有界面的 Chrome（调试用） |
-| `BROWSER_EXECUTABLE_PATH` | 指定本地 Chrome 路径 |
-| `STORAGE_STATE_DIR` | 会话文件目录（默认 `.state/`） |
-| `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | 速率限制参数 |
-| `SITE_CONFIG_DIR` | 覆盖 site YAML 目录 |
-| `LOG_LEVEL` | 日志级别（默认 `info`） |
+| `SCHOOL_BBS_USERNAME` / `_PASSWORD` / `_BASE_URL` | Site credentials |
+| `DATABASE_PATH` | SQLite data root (default `<.env dir>/data`) |
+| `BROWSER_HEADLESS` | `false` to see Chrome |
+| `BROWSER_EXECUTABLE_PATH` | Use your own Chrome binary |
+| `STORAGE_STATE_DIR` | Session file dir (default `.state/`) |
+| `RATE_MIN_INTERVAL_MS` / `RATE_JITTER_MS` / `RATE_MAX_CONCURRENCY` | Rate limit (applies to CrawlerService only — init runners use YAML `crawl.requestIntervalMs`) |
+| `SITE_CONFIG_DIR` | Override site YAML dir |
+| `LOG_LEVEL` | Default `info` |
+| `LOG_STDOUT_DISABLED` | `true` to silence stdout (CLI TUI usage) |
 
-## 公开接口（`src/index.ts`，6 组）
+Full list: `.env.example`.
 
-| 组 | 内容 |
-|---|---|
-| **① 装配** | `createCrawler(config?)` — 返回 `Crawler`；`CrawlerConfig` 类型 |
-| **② 抓取用例** | `CrawlerService`（方法：`fetchThread` / `fetchThreadById` / `listThreadsByName`）；`runInitSections` / `runInitBoards` / `runInitPinned` / `runRefreshBoardStats` |
-| **③ 读 / 查询 API** | `listSites` / `listSections` / `listBoards` / `getSectionDetail` / `listThreadsByBoard` / `getThreadByUrl` / `findBoardByName` / `getBoardById` |
-| **④ 持久化（进阶）** | `initDb` / `getStructureDb` / `getBoardDb` / `getDataDir` / `closeAllDbs`；`upsertSite` / `upsertSection` / `upsertBoard` / `upsertThread` / `upsertPosts` / `upsertDailyTraffic` / `appendFetchLog` 等 |
-| **⑤ 基础设施** | `BrowserPool` / `AuthManager` / `createRateLimiter` / `getAdapter` / `listAdapters` / `parseConfig` / `loadAndResolvePaths` |
-| **⑥ 导出 / 错误 / 类型** | `exportForumStructure` / `loadForumStructure`；10 个错误类（`BaseAppError` 等）；`logger` / `retry`；`SiteAdapter` 等契约类型 |
+## Public surface (`src/index.ts`, 6 groups)
 
-## 目录结构
+1. **Assembly** — `createCrawler` / `CrawlerRuntime` / `createCrawlerConfig`
+2. **Use cases** — `CrawlerService` (`fetchThread` / `fetchThreadById` /
+   `listThreadsByName`); `runInitSections` / `runInitBoards` /
+   `runInitPinned` / `runRefreshBoardStats`
+3. **Read API** — `listSites` / `listSections` / `listBoards` /
+   `getSectionDetail` / `listThreadsByBoard` / `getThreadByUrl` /
+   `searchThreadsByTitle` / `findBoardByName` / `getBoardById`
+4. **Persistence (advanced)** — `initDb` / `getStructureDb` / `getBoardDb` /
+   the upsert family
+5. **Infrastructure** — `BrowserPool` / `AuthManager` / `createRateLimiter` /
+   `getAdapter` / `parseConfig` / `loadAndResolvePaths`
+6. **Export + errors + types** — `exportForumStructure` /
+   `loadForumStructure`; 10 error classes (`BaseAppError` and subclasses);
+   `BrowserDeadError`; `classifyError`; `logger` + `addLogShadow`;
+   `SiteAdapter` and all contract types
+
+## Layout
 
 ```
 src/
-  contract/    SiteAdapter 接口定义（爬虫适配器契约）
-  config/      app-config（环境变量解析）、site-config（YAML 加载）、paths（路径解析）
-  session/     BrowserPool、AuthManager、createRateLimiter（浏览器与会话管理）
-  service/     CrawlerService、createCrawler（factory）、init-runners（批量初始化逻辑）
-  repository/  各表的 SQL 访问（sites / sections / boards / threads / posts 等）
-  read/        只读查询 API（readers.ts）
-  adapters/    各站点适配器（当前仅 school-bbs）
-  export/      论坛结构序列化 / 反序列化
-  util/        logger、retry
-  errors.ts    所有错误类
-  registry.ts  适配器注册表
-  index.ts     公开库入口
+  contract/    SiteAdapter interface (crawler-adapter contract)
+  config/      env config / site YAML / path resolution
+  session/     BrowserPool / AuthManager / rate-limiter
+  service/     CrawlerService, createCrawler, init-runners, page-pool, runtime wrapper
+  repository/  per-table SQL access (sites / sections / boards / threads / posts ...)
+  read/        read-only query API
+  adapters/    per-site adapters (currently only school-bbs)
+  export/      forum structure serialization
+  util/        logger (with shadow API), retry
+  errors.ts    all error classes
+  registry.ts  adapter registry
+  index.ts     public entry
 config/
-  sites/       per-site YAML 配置（<siteKey>.yml）
+  sites/       per-site YAML (<siteKey>.yml)
 scripts/
-  auth/        do-login、login-once
-  init/        init-sections、init-boards、init-threads、export-structure、refresh-board-stats
-  crawl/       crawl-thread、crawl-board、crawl-section、crawl-pinned 等
+  auth/        do-login, login-once
+  init/        init-sections, init-boards, init-threads, export-structure, refresh-board-stats
+  crawl/       crawl-thread / crawl-board / crawl-section / crawl-pinned
   db/          check-db
+  repl/        interactive shell (acceptance harness)
 ```
 
-## 开发
+## Development
 
 ```bash
-# 构建
-npm run build
-
-# 测试
-npm test
-
-# 类型检查（不产出文件）
-npm run lint:tsc
+npm run build           # tsc → dist/
+npm test                # vitest (140+ tests)
+npm run lint:tsc        # tsc --noEmit
 ```
+
+Chinese version: see [README_CH.md](README_CH.md).
