@@ -17,10 +17,19 @@ export interface CrawlerConfig extends PathOptions {
 export interface Crawler {
   service: import('./crawler-service.js').CrawlerService;
   readers: typeof import('../read/readers.js');
-  runInitSections: () => Promise<void>;
-  runInitBoards: (opts?: { sections?: import('../repository/sections.js').SectionRow[] }) => Promise<void>;
-  runInitPinned: (boards: import('../repository/boards.js').BoardRow[]) => Promise<void>;
-  runRefreshBoardStats: (opts: import('./init-runners.js').RefreshBoardStatsOpts) => Promise<import('./init-runners.js').RefreshBoardStatsResult>;
+  runInitSections: () => Promise<import('./init-runners.js').RunInitSectionsResult>;
+  runInitBoards: (
+    opts?: import('./init-runners.js').InitOpts & {
+      sections?: import('../repository/sections.js').SectionRow[];
+    },
+  ) => Promise<import('./init-runners.js').RunInitBoardsResult>;
+  runInitPinned: (
+    boards: import('../repository/boards.js').BoardRow[],
+    opts?: import('./init-runners.js').InitOpts,
+  ) => Promise<import('./init-runners.js').RunInitPinnedResult>;
+  runRefreshBoardStats: (
+    opts: import('./init-runners.js').RefreshBoardStatsOpts,
+  ) => Promise<import('./init-runners.js').RefreshBoardStatsResult>;
   withLoggedInPage: <T>(fn: (page: Page) => Promise<T>) => Promise<T>;
   /** Read-only login-state probe — navigates to baseUrl, never logs in. */
   authStatus: () => Promise<AuthStatus>;
@@ -123,13 +132,24 @@ export async function createCrawler(config: CrawlerConfig = {}): Promise<Crawler
     }
   }
 
+  // Multi-page entry used by parallel runners. Caller is responsible for
+  // closing every page it opens via `context.newPage()` and calling release().
+  async function acquireContext() {
+    const acquired = await browserPool.acquire(siteKey);
+    return {
+      context: acquired.context,
+      ensureLoggedIn: (page: Page) => auth.ensureLoggedIn(page, getAdapter(siteKey)),
+      release: acquired.release,
+    };
+  }
+
   return {
     service,
     readers,
     runInitSections: () => runInitSections(siteKey, withLoggedInPage),
-    runInitBoards: (opts) => withLoggedInPage((page) => runInitBoards(page, siteKey, opts ?? {})),
-    runInitPinned: (boards) => withLoggedInPage((page) => runInitPinned(page, siteKey, boards)),
-    runRefreshBoardStats: (opts) => withLoggedInPage((page) => runRefreshBoardStats(page, siteKey, opts)),
+    runInitBoards: (opts) => runInitBoards({ acquireContext }, siteKey, opts ?? {}),
+    runInitPinned: (boards, opts) => runInitPinned({ acquireContext }, siteKey, boards, opts ?? {}),
+    runRefreshBoardStats: (opts) => runRefreshBoardStats({ acquireContext }, siteKey, opts),
     withLoggedInPage,
     authStatus: () => checkAuthStatus(sessionOpsDeps, siteKey),
     warmUp: () => warmUpSession(sessionOpsDeps, siteKey),

@@ -47,12 +47,17 @@ export class CrawlerRuntime {
   authStatus(): Promise<AuthStatus> { return this.ready().authStatus(); }
   warmUp(): Promise<WarmUpResult> { return this.ready().warmUp(); }
 
-  runInitSections(): Promise<void> { return this.ready().runInitSections(); }
-  runInitBoards(opts?: Parameters<Crawler['runInitBoards']>[0]): Promise<void> {
+  runInitSections(): ReturnType<Crawler['runInitSections']> {
+    return this.ready().runInitSections();
+  }
+  runInitBoards(opts?: Parameters<Crawler['runInitBoards']>[0]): ReturnType<Crawler['runInitBoards']> {
     return this.ready().runInitBoards(opts);
   }
-  runInitPinned(boards: Parameters<Crawler['runInitPinned']>[0]): Promise<void> {
-    return this.ready().runInitPinned(boards);
+  runInitPinned(
+    boards: Parameters<Crawler['runInitPinned']>[0],
+    opts?: Parameters<Crawler['runInitPinned']>[1],
+  ): ReturnType<Crawler['runInitPinned']> {
+    return this.ready().runInitPinned(boards, opts);
   }
   runRefreshBoardStats(opts: Parameters<Crawler['runRefreshBoardStats']>[0]): ReturnType<Crawler['runRefreshBoardStats']> {
     return this.ready().runRefreshBoardStats(opts);

@@ -18,11 +18,13 @@ import 'dotenv/config';
 import '../../src/adapters/index';
 import * as fs from 'fs';
 import * as path from 'path';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { parseConfig } from '../../src/config/app-config';
 import { initDb, closeAllDbs } from '../../src/repository/db';
+import { AuthManager } from '../../src/session/auth-manager';
+import { getAdapter } from '../../src/registry';
 import { runRefreshBoardStats, type RefreshBoardStatsOpts } from '../../src/service/init-runners';
-import { logger } from '../../src/util/logger';
+import { logger, addRedactedSecret } from '../../src/util/logger';
 
 function parseArgs(argv: string[]): { siteKey: string; opts: RefreshBoardStatsOpts } {
   // Positional siteKey is optional. Everything else is --flag form.
@@ -80,15 +82,30 @@ async function main() {
     storageState: statePath,
     ...(cfg.browserUserAgent ? { userAgent: cfg.browserUserAgent } : {}),
   });
-  const page = await ctx.newPage();
+
+  const auth = new AuthManager({
+    env: process.env,
+    saveStorageState: async () => { await ctx.storageState({ path: statePath }); },
+    addRedactedSecret,
+  });
 
   const startedAt = Date.now();
   logger.info({ siteKey, opts, script: 'refresh-board-stats' }, 'refresh: 开始');
   try {
-    const result = await runRefreshBoardStats(page, siteKey, opts);
+    const result = await runRefreshBoardStats(
+      {
+        acquireContext: async () => ({
+          context: ctx,
+          ensureLoggedIn: (page: Page) => auth.ensureLoggedIn(page, getAdapter(siteKey)),
+          release: () => {},
+        }),
+      },
+      siteKey,
+      opts,
+    );
     logger.info(
       { siteKey, ...result, elapsedMs: Date.now() - startedAt },
-      `refresh: 完成（访问 ${result.sectionsVisited} 个 section、更新 ${result.boardsUpdated} 个版面）`,
+      `refresh: 完成（访问 ${result.sectionsVisited} 个 section、更新 ${result.boardsUpdated} 个版面、${result.failures.length} 失败）`,
     );
   } finally {
     await ctx.close();

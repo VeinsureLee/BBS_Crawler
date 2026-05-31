@@ -21,7 +21,13 @@ export type {
 export {
   runInitSections, runInitBoards, runInitPinned, runRefreshBoardStats,
 } from './service/init-runners.js';
-export type { RefreshBoardStatsOpts, RefreshBoardStatsResult } from './service/init-runners.js';
+export type {
+  InitOpts, InitProgressEvent, InitStage,
+  RunInitSectionsResult, RunInitBoardsResult, RunInitPinnedResult,
+  RefreshBoardStatsOpts, RefreshBoardStatsResult,
+} from './service/init-runners.js';
+export { BrowserDeadError } from './service/page-pool.js';
+export type { PoolDeps, PoolProgressEvent, PoolItemResult, WorkerCtx } from './service/page-pool.js';
 
 // ③ 读 / 查询 API
 export {
